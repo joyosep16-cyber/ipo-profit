@@ -76,7 +76,7 @@ Git 설치 후, CMD 창을 열고 아래 명령어를 순서대로 입력하세�
 7. 아래로 스크롤 → "Connection string" 항목 → "URI" 탭 클릭
 8. 아래와 같은 주소가 보임 → 복사해두기
 
-   postgresql://postgres:비밀번호@db.xxxx.supabase.co:5432/postgres
+   postgresql://postgres:joyosep2612*@db.fpifxqxmlfhvzkimlagc.supabase.co:5432/postgres
    (비밀번호 부분이 [YOUR-PASSWORD] 로 표시되면 직접 입력한 비밀번호로 교체)
 
 
