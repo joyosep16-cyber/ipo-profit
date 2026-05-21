@@ -1,0 +1,23 @@
+# Streamlit 및 웹 프레임워크
+streamlit>=1.57.0
+requests>=2.31.0
+
+# 데이터베이스
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+
+# 데이터 처리 및 시각화
+pandas>=2.0.0
+plotly>=5.0.0
+openpyxl>=3.1.0
+
+# 웹 스크래핑
+beautifulsoup4>=4.12.0
+
+# 외부 접속 및 알림
+pyngrok>=7.0.0
+APScheduler>=3.10.0
+
+# 유틸리티
+python-dotenv>=1.0.0
+qrcode[pil]>=7.4.2
