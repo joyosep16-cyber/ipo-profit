@@ -6,7 +6,10 @@ import streamlit as st
 
 from database import get_setting, set_setting
 from utils.config import get_env_float, get_env_int
-from utils.constants import ENV_DISCORD_WEBHOOK, ENV_HIGH_RETURN_THRESHOLD, ENV_NGROK_TOKEN, ENV_MONTHLY_GOAL, ENV_YEARLY_GOAL
+from utils.constants import (
+    ENV_DISCORD_WEBHOOK, ENV_HIGH_RETURN_THRESHOLD, ENV_NGROK_TOKEN,
+    ENV_MONTHLY_GOAL, ENV_YEARLY_GOAL, ENV_ENABLE_CLOUD_SYNC, ENV_NEON_DATABASE_URL
+)
 
 st.title("⚙️ 설정")
 
@@ -119,12 +122,40 @@ with col_y:
 
 st.divider()
 
+# ── 데이터 동기화 설정 ─────────────────────────────────────
+st.subheader("🔄 데이터 동기화")
+
+st.caption("✅ ON: Neon PostgreSQL (클라우드 동기화 - 로컬↔모바일 데이터 동일)")
+st.caption("☐ OFF: 로컬 SQLite (이 PC에만 저장 - 모바일과 분리)")
+
+# 현재 설정값 읽기
+current_sync = get_setting(ENV_ENABLE_CLOUD_SYNC) or os.getenv(ENV_ENABLE_CLOUD_SYNC, "false")
+is_cloud_sync = current_sync.lower() == "true"
+
+# 체크박스
+enable_sync = st.checkbox(
+    "🌐 클라우드 데이터 동기화 활성화",
+    value=is_cloud_sync,
+    help="ON: Neon PostgreSQL 사용 | OFF: 로컬 SQLite 사용\n앱 재시작 후 적용됨"
+)
+
+st.info(
+    "⚠️ 설정 변경 후 앱을 재시작하세요.\n"
+    "Streamlit이 자동으로 재시작되면서 새로운 데이터베이스가 적용됩니다."
+)
+
+st.divider()
+
 if st.button("💾 설정 저장", type="primary"):
     set_setting(ENV_DISCORD_WEBHOOK, webhook_url.strip())
     set_setting(ENV_HIGH_RETURN_THRESHOLD, str(threshold))
     set_setting(ENV_NGROK_TOKEN, ngrok_token.strip())
     set_setting(ENV_MONTHLY_GOAL, str(int(monthly_goal)))
     set_setting(ENV_YEARLY_GOAL, str(int(yearly_goal)))
+
+    # 클라우드 동기화 설정 추가
+    sync_enabled = "true" if enable_sync else "false"
+    set_setting(ENV_ENABLE_CLOUD_SYNC, sync_enabled)
 
     if webhook_url.strip():
         os.environ[ENV_DISCORD_WEBHOOK] = webhook_url.strip()
@@ -134,7 +165,24 @@ if st.button("💾 설정 저장", type="primary"):
     os.environ[ENV_MONTHLY_GOAL] = str(int(monthly_goal))
     os.environ[ENV_YEARLY_GOAL] = str(int(yearly_goal))
 
-    st.success("✅ 설정이 저장되었습니다.")
+    # 클라우드 동기화 환경 변수 설정
+    if enable_sync:
+        neon_url = os.getenv("NEON_DATABASE_URL") or get_setting(ENV_NEON_DATABASE_URL)
+        if not neon_url:
+            st.error("❌ Neon PostgreSQL 주소를 설정하지 않았습니다.\n.env 파일에 NEON_DATABASE_URL을 설정하세요.")
+        else:
+            os.environ["DATABASE_URL"] = neon_url
+            set_setting(ENV_NEON_DATABASE_URL, neon_url)
+            st.success("✅ 설정이 저장되었습니다.")
+            st.success("✅ 클라우드 동기화 활성화됨!")
+            st.warning("🔄 앱을 재시작하세요. (F5 새로고침 또는 앱 재실행)")
+    else:
+        if "DATABASE_URL" in os.environ:
+            del os.environ["DATABASE_URL"]
+        st.success("✅ 설정이 저장되었습니다.")
+        st.success("✅ 로컬 SQLite 사용으로 변경됨!")
+        st.warning("🔄 앱을 재시작하세요. (F5 새로고침 또는 앱 재실행)")
+
     if ngrok_token.strip():
         st.info("💡 ngrok 토큰은 앱 재시작 후 반영됩니다.")
 
