@@ -56,7 +56,7 @@ def _watchlist_reminder_job() -> None:
 
 def start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone='Asia/Seoul', daemon=True)
-    scheduler.add_job(_monthly_summary_job,   "cron", day=1, hour=0, minute=0)
+    scheduler.add_job(_monthly_summary_job,   "cron", day=1, hour=9, minute=0)
     scheduler.add_job(_watchlist_check_job,   "cron", hour=0, minute=0)
     scheduler.add_job(_watchlist_reminder_job, "cron", hour=9, minute=0)
     scheduler.start()
