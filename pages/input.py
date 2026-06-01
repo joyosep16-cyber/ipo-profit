@@ -3,10 +3,31 @@ from datetime import date
 
 import streamlit as st
 
-from database import add_record, get_record_by_id, update_record, update_watchlist_status
-from utils.calculator import calc_return_rate, get_return_label
+from database import (
+    add_record, get_record_by_id, get_setting, get_sell_tax_schedule,
+    update_record, update_watchlist_status,
+)
+from utils.calculator import (
+    calc_net_profit, calc_return_rate, calc_sell_tax, get_return_label, resolve_sell_tax_rate,
+)
 from utils.config import get_env_float
-from utils.constants import BROKERS, SUB_TYPES, ENV_HIGH_RETURN_THRESHOLD, WATCHLIST_STATUS_SUBSCRIBED
+from utils.constants import (
+    BROKERS, SUB_TYPES, ENV_HIGH_RETURN_THRESHOLD, WATCHLIST_STATUS_SUBSCRIBED,
+    ENV_SUBSCRIPTION_FEE, DEFAULT_SUBSCRIPTION_FEE,
+)
+
+
+def _get_cost_settings() -> tuple[int, list]:
+    """청약 수수료(원), 매도 세율 자동표(schedule) 로드.
+
+    세율은 매도일 기준으로 schedule 에서 자동 선택한다(resolve_sell_tax_rate).
+    """
+    try:
+        fee = int(float(get_setting(ENV_SUBSCRIPTION_FEE) or DEFAULT_SUBSCRIPTION_FEE))
+    except (ValueError, TypeError):
+        fee = DEFAULT_SUBSCRIPTION_FEE
+    schedule = get_sell_tax_schedule()
+    return fee, schedule
 from utils.discord_notifier import (
     send_high_return_alert,
     send_record_added,
@@ -117,25 +138,36 @@ def _manual_input(existing=None, is_edit=False, edit_id=None):
         memo = st.text_area("📝 메모", key="mi_memo", height=68, placeholder="선택 입력")
 
     st.divider()
+    _fee, _tax_schedule = _get_cost_settings()
+    # 매도일 기준 세율 자동 선택
+    _tax_rate = resolve_sell_tax_rate(sell_date, schedule=_tax_schedule)
     if is_miss:
-        profit      = 0
+        # 미당첨은 증거금·청약수수료 모두 환불 → 순수익 0
+        profit      = calc_net_profit(0, int(ipo_price), 0, "미당첨", _fee, _tax_rate)
         return_rate = None
-        st.caption("미당첨 종목은 수익이 0으로 기록됩니다.")
+        st.caption("미당첨 종목은 증거금과 청약 수수료가 모두 환불되어 수익 0원으로 기록됩니다.")
     else:
         if int(sell_price) > 0:
-            profit      = (int(sell_price) - int(ipo_price)) * int(quantity)
+            profit      = calc_net_profit(int(sell_price), int(ipo_price), int(quantity),
+                                          "당첨", _fee, _tax_rate)
             return_rate = calc_return_rate(profit, int(ipo_price), int(quantity))
         else:
             profit      = 0
             return_rate = None
         if ipo_price > 0 and quantity > 0 and sell_price > 0:
+            gross = (int(sell_price) - int(ipo_price)) * int(quantity)
+            sell_tax = calc_sell_tax(int(sell_price), int(quantity), _tax_rate)
             c1, c2, c3 = st.columns(3)
             profit_str  = f"+₩{profit:,}" if profit >= 0 else f"-₩{abs(profit):,}"
-            c1.metric("💵 총수익 (자동계산)", profit_str)
-            c2.metric("📈 수익률 (자동계산)", f"{return_rate:.2f}%" if return_rate is not None else "-")
+            c1.metric("💵 순수익 (수수료·세금 차감)", profit_str)
+            c2.metric("📈 수익률 (순수익 기준)", f"{return_rate:.2f}%" if return_rate is not None else "-")
             c3.metric("💰 투자원금", f"₩{int(ipo_price) * int(quantity):,}")
+            st.caption(
+                f"매매차익 ₩{gross:,}  −  청약수수료 ₩{_fee:,}  −  "
+                f"매도세금 ₩{sell_tax:,} (매도금액의 {_tax_rate}%)  =  순수익 ₩{profit:,}"
+            )
         else:
-            st.caption("공모가, 수량, 매도가를 모두 입력하면 총수익과 수익률이 자동 계산됩니다.")
+            st.caption("공모가, 수량, 매도가를 모두 입력하면 순수익(수수료·세금 차감)이 자동 계산됩니다.")
 
     st.divider()
 
@@ -231,13 +263,20 @@ def _excel_upload():
     if st.button("💾 일괄 저장", type="primary"):
         success_count = 0
         fail_messages = []
+        _fee, _tax_schedule = _get_cost_settings()
         for i, r in enumerate(records):
             try:
                 sell_price = int(r.get("sell_price") or 0)
                 ipo_price = int(r.get("ipo_price", 0))
                 quantity = int(r.get("quantity") or 0)
-                if sell_price > 0:
-                    profit = (sell_price - ipo_price) * quantity
+                sub_result = str(r.get("sub_result", "당첨"))
+                # 매도일(없으면 청약종료일) 기준 세율 자동 선택
+                _tax_rate = resolve_sell_tax_rate(r.get("sell_date") or r.get("date"),
+                                                  schedule=_tax_schedule)
+                if sell_price > 0 or sub_result == "미당첨":
+                    # 순수익(수수료·매도세금 차감)으로 계산
+                    profit = calc_net_profit(sell_price, ipo_price, quantity,
+                                             sub_result, _fee, _tax_rate)
                 else:
                     profit = int(r.get("profit") or 0)
                 _rr = r.get("return_rate")

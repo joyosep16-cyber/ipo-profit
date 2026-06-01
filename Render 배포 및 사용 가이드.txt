@@ -58,9 +58,12 @@ PC 없이도 언제 어디서나 (모바일, 다른 PC에서도) 접속 가능�
 [2단계] DATABASE_URL 설정
   .env 파일에서 DATABASE_URL 값을 다음과 같이 설정:
   
-  DATABASE_URL=postgresql://neondb_owner:비밀번호@ep-cool-boat.ap-southeast-1.aws.neon.tech/neondb?sslmode=require
+  DATABASE_URL=postgresql://<사용자>:<비밀번호>@<호스트>.neon.tech/neondb?sslmode=require
+  DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/<웹훅ID>/<웹훅토큰>
+  HIGH_RETURN_THRESHOLD=200
 
-  (실제 Neon 연결 정보로 교체)
+  (위 값은 예시입니다. 실제 Neon 연결 정보·Discord 웹훅으로 교체하세요.
+   ※ 실제 비밀값은 .env 파일에만 두고, .env 는 .gitignore 로 깃허브에 올라가지 않습니다.)
 
 [3단계] 로컬 앱 실행
   공모주앱 실행.bat 파일을 더블클릭

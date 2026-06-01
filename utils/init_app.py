@@ -10,6 +10,10 @@ def setup() -> dict:
     from dotenv import load_dotenv
     load_dotenv()
 
+    # NEON_DATABASE_URL → DATABASE_URL 승격 (database 엔진은 DATABASE_URL만 읽음).
+    # 반드시 database import(엔진 생성) 이전에 실행해야 한다.
+    _resolve_database_url()
+
     from database import init_db
     init_db()
     _apply_db_settings()
@@ -28,10 +32,32 @@ def setup() -> dict:
     return {"public_url": public_url}
 
 
+def _resolve_database_url() -> None:
+    """클라우드 DB 주소를 DATABASE_URL 로 확정한다.
+
+    우선순위:
+      1) DATABASE_URL 이 이미 설정됨 → 그대로 사용
+      2) NEON_DATABASE_URL(.env/secrets) 이 있으면 → DATABASE_URL 로 승격 (클라우드)
+      3) 둘 다 없으면 → 로컬 SQLite (database.py 기본값)
+
+    ※ database 모듈은 import 시 엔진을 생성하므로 이 함수는 그 이전에 호출되어야 한다.
+    ※ DB에만 저장된 NEON 주소(설정 페이지 입력)는 엔진 생성 순서상 여기서 읽을 수 없어
+      .env / secrets 의 NEON_DATABASE_URL 을 기준으로 한다. (설정 페이지 저장 시에는
+      해당 세션에서 즉시 DATABASE_URL 이 적용됨)
+    """
+    if os.getenv("DATABASE_URL", "").strip():
+        return
+    neon = os.getenv("NEON_DATABASE_URL", "").strip()
+    if neon:
+        os.environ["DATABASE_URL"] = neon
+
+
 def _apply_db_settings() -> None:
     try:
         from database import get_setting
-        for key in ["DISCORD_WEBHOOK_URL", "HIGH_RETURN_THRESHOLD", "NGROK_AUTH_TOKEN", "MONTHLY_GOAL", "YEARLY_GOAL"]:
+        for key in ["DISCORD_WEBHOOK_URL", "HIGH_RETURN_THRESHOLD", "NGROK_AUTH_TOKEN",
+                    "MONTHLY_GOAL", "YEARLY_GOAL", "DART_API_KEY",
+                    "SUBSCRIPTION_FEE", "SELL_TAX_RATE"]:
             val = get_setting(key)
             if val:
                 os.environ[key] = val

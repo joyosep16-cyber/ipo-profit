@@ -151,11 +151,12 @@ components.html("""
 pg = st.navigation(
     {
         "메뉴": [
-            st.Page("pages/home.py",      title="수익 현황",  icon="📊", default=True),
-            st.Page("pages/input.py",     title="데이터 입력", icon="✏️"),
             st.Page("pages/watchlist.py", title="관심 목록",  icon="⭐"),
-            st.Page("pages/yearly.py",    title="연도별 요약", icon="📅"),
+            st.Page("pages/analysis.py",  title="공모주 분석", icon="🔍"),
+            st.Page("pages/input.py",     title="데이터 입력", icon="✏️"),
+            st.Page("pages/home.py",      title="수익 현황",  icon="📊", default=True),
             st.Page("pages/charts.py",    title="통계/차트",  icon="📉"),
+            st.Page("pages/yearly.py",    title="연도별 요약", icon="📅"),
             st.Page("pages/settings.py",  title="설정",       icon="⚙️"),
         ]
     }

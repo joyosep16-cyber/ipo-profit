@@ -28,6 +28,24 @@ ENV_YEARLY_GOAL = "YEARLY_GOAL"
 ENV_DATABASE_URL = "DATABASE_URL"
 ENV_ENABLE_CLOUD_SYNC = "ENABLE_CLOUD_SYNC"
 ENV_NEON_DATABASE_URL = "NEON_DATABASE_URL"
+ENV_SUBSCRIPTION_FEE = "SUBSCRIPTION_FEE"   # 청약 수수료 (원/건)
+ENV_SELL_TAX_RATE = "SELL_TAX_RATE"         # 매도 시 증권거래세율 (%)
+
+# 비용 기본값
+DEFAULT_SUBSCRIPTION_FEE = 2000   # 청약 수수료 기본 2,000원
+DEFAULT_SELL_TAX_RATE = 0.20      # 증권거래세 기본값 (자동표 미스 시 폴백, 2026년 기준 0.20%)
+
+# 증권거래세율 자동 적용표 (적용 시작일 → 세율%, 코스피·코스닥 공통)
+# 매도일이 속하는 구간의 세율을 자동 선택한다.
+# ※ 법 개정 시 (시작일, 세율) 한 줄만 추가하면 됨. 정확한 최신값은 국세청/KRX 고시 확인.
+#   2023: 0.20% / 2024: 0.18% / 2025: 0.15% (단계적 인하)
+#   2026~: 0.20% (금투세 폐지에 따른 환원 — 코스피 0.05%+농특세0.15%, 코스닥 0.20%)
+SELL_TAX_RATE_SCHEDULE = [
+    ("2023-01-01", 0.20),
+    ("2024-01-01", 0.18),
+    ("2025-01-01", 0.15),
+    ("2026-01-01", 0.20),
+]
 
 # 수익률 판정 기준 (%)
 RETURN_RATE_VERY_HIGH = 300

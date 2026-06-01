@@ -89,11 +89,27 @@ class WatchlistItem(Base):
     memo         = Column(Text, default="")
     status       = Column(String(20), default="관심")
     created_at   = Column(DateTime, default=datetime.now)
+    # 공모주 분석 점수 연동 (analyzer 엔진 결과)
+    analysis_score = Column(Integer, nullable=True)    # 총점 (스팩/리츠는 NULL)
+    analysis_grade = Column(String(20), nullable=True) # 추천 등급
+    data_quality   = Column(String(30), nullable=True) # 🟢/🟡/🔴 데이터 신뢰도
+    otc_premium    = Column(Float, nullable=True)      # 장외 괴리율(%)
+    analyzed_at    = Column(DateTime, nullable=True)   # 분석 시각
+
+
+# watchlist 분석 점수 컬럼 (SQLite/PG 공통 정의)
+_WATCHLIST_SCORE_COLUMNS = [
+    ("analysis_score", "INTEGER"),
+    ("analysis_grade", "VARCHAR(20)"),
+    ("data_quality",   "VARCHAR(30)"),
+    ("otc_premium",    "DOUBLE PRECISION"),  # SQLite는 타입 무시(동적), PG는 실수형
+    ("analyzed_at",    "TIMESTAMP"),
+]
 
 
 def _sqlite_migrate() -> None:
     """컬럼 존재 여부를 먼저 확인한 뒤 없을 때만 ADD COLUMN — 멱등 실행 보장."""
-    _COLUMNS = [
+    _IPO_COLUMNS = [
         ("sell_price", "INTEGER DEFAULT 0"),
         ("sub_result", "TEXT DEFAULT '당첨'"),
         ("sell_date",  "DATE"),
@@ -101,9 +117,25 @@ def _sqlite_migrate() -> None:
     ]
     with engine.connect() as conn:
         existing = {row[1] for row in conn.execute(text("PRAGMA table_info(ipo_records)"))}
-        for col, defn in _COLUMNS:
+        for col, defn in _IPO_COLUMNS:
             if col not in existing:
                 conn.execute(text(f"ALTER TABLE ipo_records ADD COLUMN {col} {defn}"))
+
+        # watchlist 분석 점수 컬럼 (SQLite는 타입 표기 단순화)
+        wl_existing = {row[1] for row in conn.execute(text("PRAGMA table_info(watchlist)"))}
+        for col, _defn in _WATCHLIST_SCORE_COLUMNS:
+            if col not in wl_existing:
+                conn.execute(text(f"ALTER TABLE watchlist ADD COLUMN {col}"))
+        conn.commit()
+
+
+def _pg_migrate() -> None:
+    """PostgreSQL(Neon): create_all 은 신규 컬럼을 추가하지 않으므로 명시 ALTER.
+    ADD COLUMN IF NOT EXISTS 로 멱등 실행."""
+    with engine.connect() as conn:
+        for col, defn in _WATCHLIST_SCORE_COLUMNS:
+            conn.execute(text(
+                f"ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS {col} {defn}"))
         conn.commit()
 
 
@@ -111,6 +143,8 @@ def init_db() -> None:
     Base.metadata.create_all(engine)
     if "sqlite" in str(engine.url):
         _sqlite_migrate()
+    else:
+        _pg_migrate()
 
 
 def _to_dict(r: IPORecord) -> dict:
@@ -276,6 +310,51 @@ def log_notification(notification_type: str, ref_key: str = None) -> None:
         session.commit()
 
 
+def get_sell_tax_schedule() -> list[dict]:
+    """매도 증권거래세율 자동표 조회 [{"start":"YYYY-MM-DD","rate":0.15}, ...].
+    설정이 없으면 코드 내장 기본표를 시드로 반환."""
+    import json
+    from utils.constants import SELL_TAX_RATE_SCHEDULE
+    raw = get_setting("SELL_TAX_SCHEDULE")
+    if raw:
+        try:
+            data = json.loads(raw)
+            rows = [{"start": str(d["start"]), "rate": float(d["rate"])}
+                    for d in data if d.get("start") not in (None, "")]
+            if rows:
+                return rows
+        except (ValueError, TypeError, KeyError):
+            pass
+    return [{"start": s, "rate": r} for s, r in SELL_TAX_RATE_SCHEDULE]
+
+
+def set_sell_tax_schedule(rows: list) -> None:
+    """매도 세율 자동표 저장. rows: [{"start","rate"}, ...] (유효 행만 저장)."""
+    import json
+    clean = []
+    for r in rows:
+        start = r.get("start") if isinstance(r, dict) else None
+        rate = r.get("rate") if isinstance(r, dict) else None
+        if start in (None, "") or rate in (None, ""):
+            continue
+        try:
+            clean.append({"start": str(start)[:10], "rate": float(rate)})
+        except (ValueError, TypeError):
+            continue
+    set_setting("SELL_TAX_SCHEDULE", json.dumps(clean, ensure_ascii=False))
+
+
+def is_analysis_alerted(ref_key: str) -> bool:
+    """공모주 분석 자동알림이 이미 발송된 종목인지 확인 (중복 발송 방지).
+    ref_key 는 38커뮤니케이션 고유번호(no) 또는 종목명."""
+    with Session(engine) as session:
+        stmt = select(NotificationLog).where(
+            NotificationLog.type == "analysis_alert",
+            NotificationLog.ref_key == str(ref_key),
+        )
+        return session.execute(stmt).scalar() is not None
+
+
 # ── 관심 목록 CRUD ─────────────────────────────────────────────────────────────
 
 def _watchlist_to_dict(w: WatchlistItem) -> dict:
@@ -290,6 +369,11 @@ def _watchlist_to_dict(w: WatchlistItem) -> dict:
         "memo":         w.memo or "",
         "status":       w.status or "관심",
         "created_at":   w.created_at,
+        "analysis_score": w.analysis_score,
+        "analysis_grade": w.analysis_grade,
+        "data_quality":   w.data_quality,
+        "otc_premium":    w.otc_premium,
+        "analyzed_at":    w.analyzed_at,
     }
 
 

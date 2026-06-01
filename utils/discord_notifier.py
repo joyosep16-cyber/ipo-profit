@@ -163,3 +163,97 @@ def send_app_started(public_url: str) -> None:
         ],
         "timestamp": _now_iso(),
     })
+
+
+# ── 공모주 수요예측 분석 점수 알림 (analyzer 엔진) ─────────────────────────────
+
+_QUALITY_COLOR = {
+    "🟢 일치":            0x00FF00,
+    "🟡 DART 보정됨":     0xFF9900,
+    "🔴 38 폴백(추정치)":  0xFF0000,
+}
+
+
+def _fmt_premium(premium) -> str:
+    if premium is None:
+        return "N/A (스팩/리츠)"
+    sign = "+" if premium >= 0 else ""
+    return f"{sign}{premium:.2f}%"
+
+
+def _fmt_deposit_map(deposit_map: dict) -> str:
+    if not deposit_map:
+        return "-"
+    lines = []
+    for name, info in deposit_map.items():
+        qty = info.get("min_qty", 10)
+        dep = info.get("deposit", 0)
+        est = info.get("estimated", True)
+        qty_label = f"최소 {qty}주 추정" if est else f"최소 {qty}주"
+        lines.append(f"🏢 {name} ({qty_label} / 증거금: {dep:,}원)")
+    return "\n".join(lines)
+
+
+def send_analysis_score(detail: dict, result: dict, metrics: dict) -> None:
+    """공모주 수요예측 분석 점수 카드를 Discord 로 발송.
+
+    detail: scraper.fetch_detail + merge_sources 결과
+    result: evaluator.evaluate_ipo_score 결과
+    metrics: evaluator.build_metrics 결과
+    """
+    name = detail.get("name", "-")
+    total = result.get("total")
+    is_spac = result.get("is_spac_reit", False)
+    quality = detail.get("data_quality")
+    warn = "" if metrics.get("raw_verified") else " ⚠️(추정치)"
+    price = detail.get("confirmed_price")
+    band_high = detail.get("band_high")
+
+    # 확정공모가 + 밴드 표기
+    if price and band_high:
+        if price > band_high:
+            price_str = f"{int(price):,}원 (밴드 초과 🔼)"
+        elif price == band_high:
+            price_str = f"{int(price):,}원 (상단 확정 ✅)"
+        else:
+            price_str = f"{int(price):,}원 (밴드 내)"
+    elif price:
+        price_str = f"{int(price):,}원"
+    else:
+        price_str = "-"
+
+    fields = [
+        {"name": "확정 공모가", "value": price_str, "inline": True},
+        {"name": "기관 경쟁률", "value": f"{metrics['inst_competition']:,.2f} : 1{warn}", "inline": True},
+        {"name": "의무보유확약", "value": f"{metrics['lockup_ratio']:.2f}%{warn}", "inline": True},
+    ]
+
+    if is_spac:
+        title = f"ℹ️ [SPAC/리츠] {name} 수요예측 결과"
+        color = result.get("color", 0x3498DB)
+        desc = f"ℹ️ **{result.get('notice', '[SPAC/리츠] 기본 지표만 참고')}**"
+        fields.append({"name": "장외 괴리율", "value": "N/A (스팩/리츠는 장외 거래 없음)", "inline": True})
+        footer = "SPAC/리츠 — 점수 산정 대상 아님"
+    else:
+        title = f"🚨 [공모주 분석] {name} 수요예측 결과"
+        color = _QUALITY_COLOR.get(quality, result.get("color", 0x00FF00))
+        desc = (f"{result.get('emoji','')} **{result.get('verdict','')}** — {result.get('grade','')}\n"
+                f"📌 {result.get('action','')}\n💰 {result.get('expected_return','')}")
+        fields.append({"name": "유통가능규모", "value": f"약 {metrics['circulating_eok']:,.0f}억원", "inline": True})
+        fields.append({"name": "장외 괴리율", "value": _fmt_premium(metrics["otc_premium"]), "inline": True})
+        footer = f"가이드라인 총점: {total}점 | {result.get('expected_return','')}"
+
+    fields.append({"name": "상장 예정일", "value": str(detail.get("listing_date") or "-"), "inline": True})
+    fields.append({"name": "🏢 주관사별 최소 증거금",
+                   "value": _fmt_deposit_map(metrics.get("deposit_map", {})), "inline": False})
+    if quality:
+        fields.append({"name": "데이터 신뢰도", "value": quality, "inline": True})
+
+    _send({
+        "title": title,
+        "description": desc,
+        "color": color,
+        "fields": fields,
+        "footer": {"text": footer},
+        "timestamp": _now_iso(),
+    })

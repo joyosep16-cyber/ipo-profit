@@ -54,10 +54,60 @@ def _watchlist_reminder_job() -> None:
         print(f"[Scheduler] watchlist_reminder_job error: {e}")
 
 
+def _analysis_alert_job() -> None:
+    """매일 14·15·16·17시 — 청약일정 종목 수요예측 분석 후 16점+ Discord 자동 알림.
+
+    스팩/리츠 제외, 중복 발송 방지(NotificationLog), 종목 간 예외 격리.
+    설정에서 자동알림 OFF면 즉시 종료.
+    """
+    try:
+        import os
+        from database import get_setting, is_analysis_alerted, log_notification
+        from utils.discord_notifier import send_analysis_score
+        from analyzer import scraper, evaluator, service, config
+
+        # 자동알림 on/off
+        if get_setting("ANALYSIS_AUTO_ALERT", "1") != "1":
+            return
+
+        # DART 키 주입
+        dart_key = get_setting("DART_API_KEY", "")
+        if dart_key:
+            os.environ["DART_API_KEY"] = dart_key
+
+        # 임계점 (설정 우선, 기본 16)
+        try:
+            threshold = int(get_setting("ANALYSIS_THRESHOLD", str(config.SCORE_THRESHOLD)))
+        except ValueError:
+            threshold = config.SCORE_THRESHOLD
+
+        for c in scraper.fetch_schedule():
+            name = c.get("name", "")
+            no = c.get("no", "")
+            if evaluator.is_spac_or_reit(name):
+                continue
+            if is_analysis_alerted(no):
+                continue
+            try:
+                bundle = service.analyze_by_no(no)
+                if not bundle or bundle["is_spac"]:
+                    continue
+                total = bundle["result"].get("total")
+                if total is not None and total >= threshold:
+                    send_analysis_score(bundle["merged"], bundle["result"], bundle["metrics"])
+                    log_notification("analysis_alert", no)
+            except Exception as inner:
+                print(f"[Scheduler] analysis_alert 종목 처리 오류({name}): {inner}")
+    except Exception as e:
+        print(f"[Scheduler] analysis_alert_job error: {e}")
+
+
 def start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone='Asia/Seoul', daemon=True)
     scheduler.add_job(_monthly_summary_job,   "cron", day=1, hour=9, minute=0)
     scheduler.add_job(_watchlist_check_job,   "cron", hour=0, minute=0)
     scheduler.add_job(_watchlist_reminder_job, "cron", hour=9, minute=0)
+    # 수요예측 분석 자동알림 — 매일 14·15·16·17시
+    scheduler.add_job(_analysis_alert_job, "cron", hour="14,15,16,17", minute=0)
     scheduler.start()
     return scheduler

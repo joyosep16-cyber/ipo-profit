@@ -4,11 +4,14 @@ import sys
 
 import streamlit as st
 
-from database import get_setting, set_setting
+from database import (
+    get_setting, set_setting, get_sell_tax_schedule, set_sell_tax_schedule,
+)
 from utils.config import get_env_float, get_env_int
 from utils.constants import (
     ENV_DISCORD_WEBHOOK, ENV_HIGH_RETURN_THRESHOLD, ENV_NGROK_TOKEN,
-    ENV_MONTHLY_GOAL, ENV_YEARLY_GOAL, ENV_ENABLE_CLOUD_SYNC, ENV_NEON_DATABASE_URL
+    ENV_MONTHLY_GOAL, ENV_YEARLY_GOAL, ENV_ENABLE_CLOUD_SYNC, ENV_NEON_DATABASE_URL,
+    ENV_SUBSCRIPTION_FEE, DEFAULT_SUBSCRIPTION_FEE,
 )
 
 st.title("⚙️ 설정")
@@ -139,6 +142,17 @@ enable_sync = st.checkbox(
     help="ON: Neon PostgreSQL 사용 | OFF: 로컬 SQLite 사용\n앱 재시작 후 적용됨"
 )
 
+# Neon PostgreSQL 주소 입력 (체크박스 ON 시 필수)
+current_neon = os.getenv(ENV_NEON_DATABASE_URL) or get_setting(ENV_NEON_DATABASE_URL) or ""
+neon_url_input = st.text_input(
+    "Neon PostgreSQL 주소 (DATABASE_URL)",
+    value=current_neon,
+    type="password",
+    placeholder="postgresql://user:password@ep-xxx.aws.neon.tech/neondb?sslmode=require",
+    help="neon.tech 에서 발급받은 연결 문자열. 클라우드 동기화를 켜려면 반드시 입력하세요.",
+    disabled=not enable_sync,
+)
+
 st.info(
     "⚠️ 설정 변경 후 앱을 재시작하세요.\n"
     "Streamlit이 자동으로 재시작되면서 새로운 데이터베이스가 적용됩니다."
@@ -146,7 +160,92 @@ st.info(
 
 st.divider()
 
+# ── 공모주 분석 설정 (analyzer) ────────────────────────────
+st.subheader("🔍 공모주 분석 설정")
+st.caption("38커뮤니케이션 수요예측 분석 + DART 교차검증용 설정입니다. "
+           "분석 자동알림은 위의 Discord 웹훅을 공유합니다.")
+
+current_dart = get_setting("DART_API_KEY") or os.getenv("DART_API_KEY", "")
+dart_api_key = st.text_input(
+    "DART API 키 (OpenDART)",
+    value=current_dart,
+    type="password",
+    placeholder="opendart.fss.or.kr 에서 무료 발급",
+    help="입력 시 기관 신청수량·확약수량을 DART 공식 공시로 교차검증합니다. 없으면 38커뮤니케이션 단독 분석.",
+)
+
+try:
+    default_anal_threshold = int(get_setting("ANALYSIS_THRESHOLD") or 16)
+except ValueError:
+    default_anal_threshold = 16
+
+col_at, col_aa = st.columns(2)
+with col_at:
+    analysis_threshold = st.number_input(
+        "분석 자동알림 임계점 (점)",
+        min_value=0, max_value=31, value=default_anal_threshold, step=1,
+        help="이 점수 이상인 종목을 매일 14·15·16·17시에 Discord로 자동 알립니다.",
+    )
+with col_aa:
+    auto_alert = st.checkbox(
+        "분석 자동알림 활성화",
+        value=(get_setting("ANALYSIS_AUTO_ALERT", "1") == "1"),
+        help="끄면 스케줄러가 분석 자동알림을 발송하지 않습니다.",
+    )
+
+st.divider()
+
+# ── 비용 설정 (청약 수수료 / 매도 세금) ────────────────────
+st.subheader("💸 비용 설정 (수수료·세금)")
+st.caption("순수익 = 매매차익 − 청약수수료 − 매도세금. 데이터 입력 시 자동 차감됩니다.")
+st.caption("※ 증권사 매도 수수료는 증권사·계좌마다 달라 반영하지 않습니다.")
+
+try:
+    default_fee = int(float(get_setting(ENV_SUBSCRIPTION_FEE) or DEFAULT_SUBSCRIPTION_FEE))
+except (ValueError, TypeError):
+    default_fee = DEFAULT_SUBSCRIPTION_FEE
+
+subscription_fee = st.number_input(
+    "청약 수수료 (원/건)",
+    min_value=0, max_value=100000, value=default_fee, step=500,
+    help="청약 1건당 증권사 수수료. 당첨 시 차감, 미당첨은 환불(0원). (보통 2,000원, 일부 무료)",
+)
+
+st.markdown("**매도 증권거래세율 (%) — 적용 시작일별 자동 적용**")
+st.caption("매도일이 속하는 구간의 세율이 자동 적용됩니다. 법 개정 시 행을 추가하세요. "
+           "(예: 2025-01-01 / 0.15) · 국세청·KRX 고시 기준으로 입력")
+
+import pandas as _pd
+_sched = get_sell_tax_schedule()   # [{"start","rate"}, ...]
+_sched_df = _pd.DataFrame(_sched if _sched else [{"start": "2025-01-01", "rate": 0.15}])
+tax_schedule_edited = st.data_editor(
+    _sched_df,
+    num_rows="dynamic",
+    use_container_width=True,
+    column_config={
+        "start": st.column_config.TextColumn("적용 시작일 (YYYY-MM-DD)", required=True),
+        "rate": st.column_config.NumberColumn("세율 (%)", min_value=0.0, max_value=1.0,
+                                              step=0.01, format="%.3f", required=True),
+    },
+    key="tax_schedule_editor",
+)
+
+st.divider()
+
 if st.button("💾 설정 저장", type="primary"):
+    set_setting("DART_API_KEY", dart_api_key.strip())
+    set_setting("ANALYSIS_THRESHOLD", str(int(analysis_threshold)))
+    set_setting("ANALYSIS_AUTO_ALERT", "1" if auto_alert else "0")
+    set_setting(ENV_SUBSCRIPTION_FEE, str(int(subscription_fee)))
+    os.environ[ENV_SUBSCRIPTION_FEE] = str(int(subscription_fee))
+    # 매도 세율 자동표 저장 (data_editor → list[dict])
+    try:
+        _rows = tax_schedule_edited.to_dict("records")
+    except AttributeError:
+        _rows = list(tax_schedule_edited)
+    set_sell_tax_schedule(_rows)
+    if dart_api_key.strip():
+        os.environ["DART_API_KEY"] = dart_api_key.strip()
     set_setting(ENV_DISCORD_WEBHOOK, webhook_url.strip())
     set_setting(ENV_HIGH_RETURN_THRESHOLD, str(threshold))
     set_setting(ENV_NGROK_TOKEN, ngrok_token.strip())
@@ -167,9 +266,14 @@ if st.button("💾 설정 저장", type="primary"):
 
     # 클라우드 동기화 환경 변수 설정
     if enable_sync:
-        neon_url = os.getenv("NEON_DATABASE_URL") or get_setting(ENV_NEON_DATABASE_URL)
+        # 입력 필드 우선 → 없으면 기존 env/DB 설정
+        neon_url = (neon_url_input.strip()
+                    or os.getenv("NEON_DATABASE_URL")
+                    or get_setting(ENV_NEON_DATABASE_URL))
         if not neon_url:
-            st.error("❌ Neon PostgreSQL 주소를 설정하지 않았습니다.\n.env 파일에 NEON_DATABASE_URL을 설정하세요.")
+            st.error("❌ Neon PostgreSQL 주소를 입력하지 않았습니다.\n"
+                     "위 'Neon PostgreSQL 주소' 칸에 연결 문자열을 입력하거나, "
+                     "클라우드 동기화를 끄고 로컬(SQLite)로 사용하세요.")
         else:
             os.environ["DATABASE_URL"] = neon_url
             set_setting(ENV_NEON_DATABASE_URL, neon_url)
