@@ -1,3 +1,9 @@
+# 앱 버전 정보
+APP_VERSION = "2.1.0"
+APP_NAME = "공모주 수익 관리"
+APP_DESCRIPTION = "38.co.kr 스크래퍼 + 날짜 보정 + 순수익 계산"
+LAST_UPDATE = "2026-06-10"
+
 # 증권사 목록
 BROKERS = [
     "미정",

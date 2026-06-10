@@ -15,6 +15,7 @@ st.set_page_config(
 
 from database import init_db
 from utils.init_app import setup
+from utils.constants import APP_VERSION, LAST_UPDATE
 
 # 핫리로드 시 session_state가 초기화되므로, 코드 변경 후에도 마이그레이션이 반드시 실행됨
 # (@st.cache_resource는 핫리로드에도 보존되므로 setup() 내부 init_db()에만 의존하면 안 됨)
@@ -115,6 +116,7 @@ with st.sidebar:
             st.caption("⚙️ 설정에서 ngrok 토큰을 입력하면 외부 접속 URL이 생성됩니다.")
 
     st.divider()
+    st.caption(f"**v{APP_VERSION}** (업데이트: {LAST_UPDATE})")
     st.caption("© 공모주 수익 관리 앱")
 
 # 달력 UI 한국어 표시 (MutationObserver로 react-datepicker 번역)
