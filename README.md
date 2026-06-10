@@ -44,10 +44,11 @@ IPO(신규상장주식)의 **청약 전 수요예측 점수 분석**부터 **청
 - 엑셀 내보내기/가져오기
 
 ### ⭐ 관심 목록
-- ipostock.co.kr에서 **자동 조회** (확정가 우선)
+- **38.co.kr에서 자동 조회** (최신 데이터 우선) + ipostock.co.kr 폴백
 - 청약 예정 종목 사전 등록
 - D-day 계산 및 자동 알림
 - 청약 신청 시 정보 자동 채우기
+- 과거 날짜 자동 보정 (6월 11일에 "05/29" → 다음 해 5월 29일)
 
 ### 📅 데이터 입력
 - **수동 입력**: 모든 정보를 직접 입력
@@ -95,7 +96,7 @@ IPO(신규상장주식)의 **청약 전 수요예측 점수 분석**부터 **청
 │   ├── config.py           ← 환경변수 관리
 │   ├── calculator.py       ← 수익 계산 함수
 │   ├── formatters.py       ← 포매팅 유틸
-│   ├── ipo_scraper.py      ← ipostock 자동 조회 (관심목록)
+│   ├── ipo_scraper.py      ← 38.co.kr + ipostock 자동 조회 (관심목록)
 │   ├── discord_notifier.py ← Discord 알림 (분석 점수 포함)
 │   ├── excel_handler.py    ← 엑셀 처리
 │   ├── scheduler.py        ← 자동 스케줄 (분석 자동알림 포함)
@@ -150,7 +151,12 @@ IPO(신규상장주식)의 **청약 전 수요예측 점수 분석**부터 **청
 
 ## 🌐 배포
 
-PC 없이 24시간 접속하려면 [Streamlit Cloud 배포방법.txt](./Streamlit%20Cloud%20배포방법.txt)를 참조하세요.
+**클라우드 URL (권장)**: https://ipo-profit-app.onrender.com
+- PC 없이 24시간 접속 가능
+- Neon PostgreSQL 클라우드 데이터베이스
+- 자동 배포 (GitHub push → 3~5분 후 반영)
+
+더 자세한 내용은 [Render 배포 및 사용 가이드.txt](./Render%20배포%20및%20사용%20가이드.txt)를 참조하세요.
 
 ## 📊 데이터 구조
 
@@ -202,6 +208,7 @@ PC 없이 24시간 접속하려면 [Streamlit Cloud 배포방법.txt](./Streamli
 
 ---
 
-**버전**: 2.0.0 (공모주 분석 엔진 통합)  
-**마지막 업데이트**: 2026년 5월 31일  
-**개발**: Claude Code
+**버전**: 2.1.0 (38.co.kr 스크래퍼 + 날짜 보정 추가)  
+**마지막 업데이트**: 2026년 6월 10일  
+**개발**: Claude Code  
+**배포**: Render.com + Neon PostgreSQL
