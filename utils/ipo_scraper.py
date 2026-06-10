@@ -142,18 +142,123 @@ def _search_ipo02(name_lower: str, year: int) -> dict | None:
     return None
 
 
-def search_ipo_on_ipostock(stock_name: str) -> dict | None:
+def _fetch_38kr_schedule() -> list[dict] | None:
     """
-    종목명(부분 일치)으로 ipostock.co.kr 검색.
-    1) ipo04.asp(공모청약일정) — 확정 공모가 우선
-    2) ipo02.asp(수요예측일정) — 희망가 상한 fallback
-    실패 시 None 반환 (예외 없음).
+    38.co.kr에서 공모주 일정 데이터 수집.
+    반환: [{"stock_name", "sub_start", "sub_end", "listing_date", "ipo_price", "broker"}, ...] 또는 None
+    """
+    if not _BS4_AVAILABLE:
+        return None
+    try:
+        soup = _fetch_soup("https://www.38.co.kr/")
+        if soup is None:
+            return None
+        items = []
+        for tr in soup.find_all("tr"):
+            cells = tr.find_all("td")
+            if len(cells) < 3:
+                continue
+            stock_text = cells[0].get_text(strip=True)
+            if not stock_text:
+                continue
+            date_text = cells[1].get_text(strip=True)
+            if not date_text:
+                continue
+            date_parts = re.split(r"~", date_text)
+            if len(date_parts) < 1:
+                continue
+            sub_start = _parse_38kr_date(date_parts[0].strip())
+            sub_end = _parse_38kr_date(date_parts[1].strip()) if len(date_parts) > 1 else None
+            listing_date = None
+            if len(cells) > 2:
+                listing_text = cells[2].get_text(strip=True)
+                if listing_text and listing_text != "-":
+                    listing_date = _parse_38kr_date(listing_text)
+            ipo_price = None
+            if len(cells) > 3:
+                price_text = cells[3].get_text(strip=True)
+                ipo_price = _parse_price(price_text)
+            broker = None
+            if len(cells) > 4:
+                broker_text = cells[4].get_text(strip=True)
+                broker = _match_broker(broker_text)
+            items.append({
+                "stock_name": stock_text,
+                "sub_start": sub_start,
+                "sub_end": sub_end,
+                "listing_date": listing_date,
+                "ipo_price": ipo_price,
+                "broker": broker,
+            })
+        return items if items else None
+    except Exception:
+        return None
+
+
+def _parse_38kr_date(date_str: str) -> date | None:
+    """
+    38.co.kr 형식 날짜 파싱: "MM/DD" 또는 "YYYY/MM/DD".
+    과거 날짜면 다음 연도로 자동 변환.
+    """
+    if not date_str or not date_str.strip():
+        return None
+    date_str = date_str.strip()
+    parts = date_str.split("/")
+    try:
+        if len(parts) == 2:
+            month, day = int(parts[0]), int(parts[1])
+            d = date(date.today().year, month, day)
+        elif len(parts) == 3:
+            year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
+            d = date(year, month, day)
+        else:
+            return None
+    except (ValueError, IndexError):
+        return None
+    from datetime import timedelta
+    if d < date.today():
+        try:
+            d = date(d.year + 1, d.month, d.day)
+        except ValueError:
+            pass
+    return d
+
+
+def search_ipo_on_38kr(stock_name: str) -> dict | None:
+    """
+    38.co.kr에서 종목명(부분 일치)으로 공모주 정보 검색.
     """
     if not _BS4_AVAILABLE:
         return None
     if not stock_name.strip():
         return None
     name_lower = stock_name.strip().lower()
+    items = _fetch_38kr_schedule()
+    if items is None:
+        return None
+    for item in items:
+        if name_lower in item["stock_name"].lower():
+            return item
+    return None
+
+
+def search_ipo_on_ipostock(stock_name: str) -> dict | None:
+    """
+    종목명(부분 일치)으로 공모주 검색.
+    우선 순서: 38.co.kr → ipostock.co.kr
+    1) search_ipo_on_38kr() — 38.co.kr에서 검색
+    2) _search_ipo04() — ipostock ipo04 (확정 공모가 우선)
+    3) _search_ipo02() — ipostock ipo02 (희망가 상한 fallback)
+    실패 시 None 반환.
+    """
+    if not _BS4_AVAILABLE:
+        return None
+    if not stock_name.strip():
+        return None
+    name_lower = stock_name.strip().lower()
+    result = search_ipo_on_38kr(stock_name)
+    if result is not None:
+        return result
     year = date.today().year
     result = _search_ipo04(name_lower, year)
     if result is None:

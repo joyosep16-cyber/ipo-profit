@@ -13,3 +13,10 @@ def fmt_date_short(d: date) -> str:
     if not d:
         return "-"
     return d.strftime("%m/%d")
+
+
+def fmt_listing_date(d: date | None) -> str:
+    """상장일 포맷팅 (미정 처리): None → '미정', date → '2026년 5월 20일'"""
+    if not d:
+        return "미정"
+    return f"{d.year}년 {d.month}월 {d.day}일"
