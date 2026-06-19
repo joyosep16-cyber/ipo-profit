@@ -171,10 +171,17 @@ def _render_score_card(bundle: dict) -> None:
 tab_list, tab_search = st.tabs(["📅 청약일정 목록", "🔎 직접 검색"])
 
 with tab_list:
-    cols = st.columns([3, 1])
+    cols = st.columns([2, 1, 1])
     with cols[1]:
         if st.button("🔄 목록 새로고침", use_container_width=True):
             _cached_schedule.clear()
+    with cols[2]:
+        # 분석 결과는 30분 캐시된다. 코드/사이트 데이터가 바뀌었는데 옛 결과가
+        # 남아있을 때 이 버튼으로 분석 캐시와 표시 중인 카드를 모두 비운다.
+        if st.button("🧹 분석 캐시 비우기", use_container_width=True):
+            _cached_analyze.clear()
+            st.session_state.pop("analysis_bundle", None)
+            st.success("분석 캐시를 비웠습니다. 다시 분석을 실행하세요.")
     candidates = _cached_schedule()
     if not candidates:
         st.warning("청약일정을 불러오지 못했습니다. (네트워크 또는 사이트 상태 확인)")
