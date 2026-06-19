@@ -4,3 +4,7 @@ __pycache__/
 *.pyc
 .streamlit/secrets.toml
 streamlit_log.txt
+
+# 대화 기록 내보내기 — 토큰·웹훅 등 비밀값이 평문으로 포함될 수 있어 제외
+*.jsonl
+대화내용_최종.jsonl
