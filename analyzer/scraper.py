@@ -3,12 +3,13 @@
 세 가지 작업:
   1) fetch_schedule()  : 공모주 청약일정 목록에서 신규 종목의 (종목명, no, 일정) 추출
   2) fetch_detail(no)  : 공모분석 상세 표에서 '원본 수량' 우선 파싱
-  3) get_otc_price()   : 장외 매도 호가 상위 5개 → 절미평균
+  3) get_otc_price()   : 장외 팝니다·삽니다 호가 → 이상치 제거 후 평균
 
 HTML 구조 의존을 한곳에 모으기 위해 라벨 기반 조회 헬퍼(_find_value_by_label)를 둔다.
 사이트 구조가 바뀌면 라벨 매칭/정규식만 손보면 된다.
 """
 import re
+import statistics
 from typing import Optional
 
 from bs4 import BeautifulSoup
@@ -191,6 +192,16 @@ def fetch_schedule(only_upcoming: bool = True, exclude_spac_reit: bool = True) -
 # ===========================================================================
 # 2) 공모분석 상세 → 원본 수량 우선 파싱
 # ===========================================================================
+def _parse_alloc_max(text: Optional[str]) -> Optional[float]:
+    """'1,080,000~1,160,000 주' 같은 배정물량 문자열에서 최대값(최종 배정) 반환.
+    범위가 아니면 그 값을, 숫자가 없으면 None."""
+    if not text:
+        return None
+    nums = [parse_number(t) for t in re.findall(r"[\d,]+", text)]
+    nums = [n for n in nums if n and n > 0]
+    return max(nums) if nums else None
+
+
 def fetch_detail(no: str) -> Optional[dict]:
     """상세 페이지 파싱. 원본 수량(분자/분모)을 우선 확보, 실패 시 표시 %로 폴백.
 
@@ -227,7 +238,9 @@ def fetch_detail(no: str) -> Optional[dict]:
 
         # --- 원본 수량 (분자/분모) ---
         # [버그수정] "기관투자자등" 추가 (실제 라벨)
-        inst_allocation = parse_number(
+        # 기관 배정물량 — '1,080,000~1,160,000 주'처럼 범위면 최종 배정(상한)을 사용.
+        # 사이트가 표시하는 기관경쟁률도 상한(최종 배정) 기준이므로 일치한다.
+        inst_allocation = _parse_alloc_max(
             _find_value_by_label(soup, "기관투자자등", "기관배정", "기관 배정"))
         # 수요예측 결과 표에서 기관 총 신청수량 전용 파서 우선 시도
         inst_total_demand = _parse_inst_demand(soup)
@@ -377,12 +390,14 @@ def _parse_otc_from_detail(soup: BeautifulSoup,
 
         price = parse_number(cells[1])   # 희망가격 = 두 번째 셀
         if price and min_p <= price <= max_p:
-            if mode == "sell" and len(sell_prices) < 5:
+            # 이상치 제거를 위해 상위 5개로 자르지 않고 넉넉히(최대 30건) 수집한다.
+            # 실제 평균에 쓰는 '상위 5개'는 get_otc_price 에서 이상치 제외 후 선별.
+            if mode == "sell" and len(sell_prices) < _OTC_COLLECT_MAX:
                 sell_prices.append(price)
-            elif mode == "buy" and len(buy_prices) < 5:
+            elif mode == "buy" and len(buy_prices) < _OTC_COLLECT_MAX:
                 buy_prices.append(price)
 
-        if len(sell_prices) >= 5 and len(buy_prices) >= 5:
+        if len(sell_prices) >= _OTC_COLLECT_MAX and len(buy_prices) >= _OTC_COLLECT_MAX:
             break
 
     logger.info("장외 수집(상세페이지): 팝니다 %d건%s | 삽니다 %d건%s",
@@ -447,30 +462,34 @@ def _sum_lockup_quantity(soup: BeautifulSoup) -> Optional[float]:
     return None
 
 
+# 기관 단순경쟁 비율 셀 (예: '1,294.99:1') — 셀 전체가 비율 형태일 때만 매칭
+_COMP_RATIO_RE = re.compile(r"^[\d,]+(?:\.\d+)?\s*:\s*1$")
+
+
 def _parse_inst_demand(soup: BeautifulSoup) -> Optional[float]:
     """수요예측 결과 표에서 기관 총 신청수량(주) 추출.
 
-    실제 페이지 구조(38커뮤니케이션):
-      헤더행 — 참여건수 (단위:건) | 신청주식수 (단위:주) | 단순경쟁
-      데이터행 — 2,329             | 1,444,988,385         | 847.76
+    실제 페이지 구조(38커뮤니케이션) — '단순경쟁' 데이터행:
+      참여건수 | 신청주식수      | 단순경쟁률
+      2,252    | 1,502,187,765   | 1,294.99:1
 
-    "참여건수" 헤더 다음 행에서 1억 이상인 첫 숫자를 기관 총 신청수량으로 반환.
+    [버그 수정] 38 상세 페이지는 전체 내용을 하나의 거대 셀에 담은 wrapper 표가
+    먼저 잡혀, 문서상 앞서 나오는 확약수량(예: '3개월 확약 180,918,700')을
+    총 신청수량으로 오인하는 문제가 있었다.
+    → '단순경쟁률(…:1)' 셀이 들어있는 '짧은 데이터행'만 인정하고, 그 행의
+      1억 이상 숫자를 총 신청수량으로 반환한다(거대 wrapper 행 자동 배제).
     """
-    for table in soup.find_all("table"):
-        ttext = table.get_text(" ", strip=True)
-        if "참여건수" not in ttext or "신청주식수" not in ttext:
+    for row in soup.find_all("tr"):
+        cells = [c.get_text(strip=True) for c in row.find_all(["td", "th"])]
+        cells = [c for c in cells if c]
+        if not (2 <= len(cells) <= 6):   # 데이터행만 (거대 wrapper 행 배제)
             continue
-        if "주주명" in ttext:   # 주주현황 표 배제
-            continue
-        rows = table.find_all("tr")
-        for i, row in enumerate(rows):
-            if "참여건수" not in row.get_text(" ", strip=True):
-                continue
-            for j in range(i + 1, min(i + 4, len(rows))):
-                for cell in rows[j].find_all(["td", "th"]):
-                    n = parse_number(cell.get_text(strip=True))
-                    if n is not None and n >= 100_000_000:   # 1억 이상 = 총 신청수량
-                        return n
+        if not any(_COMP_RATIO_RE.match(c) for c in cells):
+            continue   # 단순경쟁률(…:1) 셀이 있는 행만
+        for c in cells:
+            n = parse_number(c)
+            if n is not None and n >= 100_000_000:   # 1억 이상 = 총 신청수량
+                return n
     return None
 
 
@@ -482,12 +501,15 @@ def _parse_circulating(soup: BeautifulSoup) -> Optional[float]:
     [수정] 셀 순차 탐색으로 lock-up합계 + 유통합계 쌍을 찾는 방식으로 전환
     탐색 패턴: (大숫자A) (X%) (大숫자B) (Y%) where X + Y ≈ 100
 
-    대상 테이블: "주주명" AND "유통가능물량" 모두 포함 (주주현황 표)
+    대상 테이블: "유통가능물량" + ("주주명" 또는 "성명") 포함 (주주현황 표)
+      ※ 재상장·이전상장 종목은 라벨이 "성명"인 경우가 있어 둘 다 허용한다.
     유효 범위: 유통가능주식수 = 100,000 ~ 100,000,000 주
     """
     for table in soup.find_all("table"):
         ttext = table.get_text(" ", strip=True)
-        if "유통가능물량" not in ttext or "주주명" not in ttext:
+        if "유통가능물량" not in ttext:
+            continue
+        if "주주명" not in ttext and "성명" not in ttext:
             continue
 
         cells = table.find_all(["td", "th"])
@@ -516,13 +538,48 @@ def _parse_circulating(soup: BeautifulSoup) -> Optional[float]:
 
 
 # ===========================================================================
-# 3) 장외 가격 → 절미평균 (방어 로직 강화)
+# 3) 장외 가격 → 이상치 제거 후 평균 (방어 로직 강화)
 # ===========================================================================
 
 # 장외 시세 없음을 나타내는 사이트 텍스트 패턴
 _NO_PRICE_TEXTS = ("시세없음", "등록된 글이 없", "데이터가 없", "검색결과가 없")
 
 _PRICE_RE = re.compile(r"\d{1,3}(?:,\d{3})+|\d{4,}")
+
+_OTC_TOP_N = 5            # 평균에 사용할 정상 호가 상위 개수(매도·매수 각각)
+_OTC_COLLECT_MAX = 30     # 수집 단계 상한(이상치 제거 후 상위 N개를 뽑기 위해 넉넉히 모음)
+
+
+def _otc_band(prices: list, tol: float = config.OTC_OUTLIER_TOL) -> tuple:
+    """중앙값(median) 기준 허용 밴드 (low, high) 반환.
+
+    장외 게시판에는 시세와 동떨어진 호가가 섞인다(예: 대부분 5~6만인데
+    갑자기 10만 매도호가, 2만 헐값 매수호가). 중앙값은 극단값에 둔감하므로
+    중앙값 대비 ±tol(기본 40%) 밴드를 기준으로 삼는다.
+      예) 중앙값 5.5만 → (3.3만, 7.7만). 10만(+82%)·2만(-64%) 모두 밴드 밖.
+
+    데이터 3개 미만이면 신뢰할 중앙값을 못 잡아 (None, None) 반환(필터 안 함).
+    """
+    valid = [p for p in prices if p is not None and p > 0]
+    if len(valid) < 3:
+        return None, None
+    med = statistics.median(valid)
+    if med <= 0:
+        return None, None
+    return med * (1 - tol), med * (1 + tol)
+
+
+def _reject_otc_outliers(prices: list, tol: float = config.OTC_OUTLIER_TOL) -> list:
+    """중앙값 밴드를 벗어난 터무니없는 호가를 제거한 리스트 반환.
+
+    데이터 3개 미만이면 원본 유지(0·None 만 정리). 필터 결과가 비면 원본 반환.
+    """
+    valid = [p for p in prices if p is not None and p > 0]
+    low, high = _otc_band(valid, tol)
+    if low is None:
+        return valid
+    kept = [p for p in valid if low <= p <= high]
+    return kept or valid
 
 
 def get_otc_price(
@@ -532,61 +589,68 @@ def get_otc_price(
     sell_prices: Optional[list] = None,
     buy_prices: Optional[list] = None,
 ) -> Optional[float]:
-    """장외 팝니다(매도)+삽니다(매수) 통합 절미평균 산출.
+    """장외 시세가 산출. 없으면 None(=장외 시세 없음).
 
-    sell_prices / buy_prices 가 제공되면 (fetch_detail에서 상세 페이지 내 파싱)
-    별도 HTTP 요청 없이 즉시 계산. 없으면 OTC URL로 폴백 시도.
+    장외 '있음' 판정 기준은 **팝니다(매도호가)와 삽니다(매수호가)가 모두 존재**하는
+    것이다. 한쪽만 있으면 실거래 시세로 보기 어려워 '없음'으로 처리한다.
+      (예: 져스텍 — 삽니다만 5건, 팝니다 0건 → 장외 없음)
 
-    절미평균: 전체 합산 후 최고·최저 제외 → 이상값 자동 제거.
-    데이터 없으면 confirmed_price 반환 (괴리율 0%).
+    양쪽이 모두 있으면 매도·매수 호가를 합쳐 이상치 제거 후 평균.
+    이상치 제거: 중앙값 대비 ±OTC_OUTLIER_TOL 밴드 밖 호가는 버린다.
+
+    반환:
+      float  — 장외 시세 있음(평균가)
+      None   — 장외 시세 없음(매도/매수호가 중 하나라도 없음 / 데이터 미확보 / 예외)
+               → 점수 -2 대상
     """
-    def _fallback(reason: str) -> Optional[float]:
-        logger.info("장외가 폴백(%s): %s → 공모가(%s) 반환 (괴리율 0%%)",
-                    reason, name, confirmed_price)
-        return confirmed_price
-
     try:
-        # ── 1순위: 상세 페이지에서 미리 파싱된 가격 사용 ──────────────
-        all_prices = list(sell_prices or []) + list(buy_prices or [])
+        sells = list(sell_prices or [])
+        buys = list(buy_prices or [])
 
-        # ── 2순위: OTC URL 폴백 (상세 페이지에 데이터 없는 경우) ────────
-        if not all_prices:
+        # 상세 페이지에 팝니다·삽니다가 모두 없을 때만 OTC URL 재시도
+        if not sells and not buys:
             url = config.OTC_URL.format(name=name)
             soup = _soup(url)
-            if soup is None:
-                return _fallback("HTTP 실패")
-            page_text = soup.get_text(" ", strip=True)
-            if any(kw in page_text for kw in _NO_PRICE_TEXTS):
-                return _fallback("시세없음")
+            if soup is not None:
+                page_text = soup.get_text(" ", strip=True)
+                if not any(kw in page_text for kw in _NO_PRICE_TEXTS):
+                    sells, buys = _parse_otc_from_detail(soup, confirmed_price)
 
-            # 페이지에서 직접 팝니다/삽니다 재시도
-            sp, bp = _parse_otc_from_detail(soup, confirmed_price)
-            all_prices = sp + bp
+        # 매도호가·매수호가 둘 중 하나라도 없으면 장외 시세 없음으로 판정
+        if not sells or not buys:
+            logger.info("장외 없음(매도 %d건·매수 %d건 — 양쪽 모두 필요): %s",
+                        len(sells), len(buys), name)
+            return None
 
-            if not all_prices:
-                return _fallback("팝니다·삽니다 호가 없음")
+        raw_n = len(sells) + len(buys)
 
-        # ── 절미평균 계산 ────────────────────────────────────────────────
-        sell_n = len(sell_prices or [])
-        buy_n = len(buy_prices or [])
+        # ── 1단계: 터무니없는 호가(이상치)를 먼저 제외 ──────────────────────
+        # 중앙값 밴드를 매도+매수 전체 분포에서 산출한 뒤, 각 호가를 거른다.
+        # (상위 5개를 '자른 뒤' 거르는 게 아니라, 거른 뒤 상위 5개를 뽑는다)
+        low, high = _otc_band(sells + buys)
+        if low is not None:
+            sells = [p for p in sells if low <= p <= high]
+            buys = [p for p in buys if low <= p <= high]
 
-        if len(all_prices) >= 3:
-            all_prices.sort()
-            trimmed = all_prices[1:-1]   # 전체 최고·최저 제외
-            otc = sum(trimmed) / len(trimmed)
-        else:
-            otc = sum(all_prices) / len(all_prices)
+        # 이상치 제거 후에도 양쪽이 모두 남아야 장외 시세로 인정
+        if not sells or not buys:
+            logger.info("장외 없음(이상치 제외 후 매도 %d·매수 %d): %s",
+                        len(sells), len(buys), name)
+            return None
+
+        # ── 2단계: 정상 호가 중 상위 5개씩(게시판 상단=최신) → 통합 평균 ──────
+        chosen = sells[:_OTC_TOP_N] + buys[:_OTC_TOP_N]
+        otc = sum(chosen) / len(chosen)
 
         logger.info(
-            "장외 통합 평균(%s): %s원 (팝니다 %d건+삽니다 %d건, 절미 후 %d개 사용)",
-            name, f"{round(otc):,}", sell_n, buy_n,
-            len(all_prices) - (2 if len(all_prices) >= 3 else 0),
+            "장외 평균(%s): %s원 (수집 %d건 → 이상치 제외 후 매도 %d·매수 %d 중 상위 %d개 사용)",
+            name, f"{round(otc):,}", raw_n, len(sells), len(buys), len(chosen),
         )
         return otc
 
     except Exception as exc:
-        logger.warning("장외 가격 파싱 예외(%s): %s → 공모가 폴백", name, exc)
-        return _fallback("파싱 예외")
+        logger.warning("장외 가격 파싱 예외(%s): %s → 장외 없음 처리", name, exc)
+        return None
 
 
 def _extract_price_from_row(row) -> Optional[float]:

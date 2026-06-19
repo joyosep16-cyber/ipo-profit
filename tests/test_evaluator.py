@@ -1,7 +1,7 @@
 """evaluator 단위 테스트.
 
 가이드 6장 스코어링 테이블과 9장 등급 기준에 따라 항목별 점수·총점·추천 등급,
-4대 산식, 절미평균(scraper) 경계값을 검증한다.
+4대 산식, 장외 호가 이상치 제거(scraper) 경계값을 검증한다.
 
 실행: pytest -q   또는   python -m pytest tests/
 """
@@ -57,7 +57,7 @@ def test_score_table_high():
     # 경쟁률 500↑(5) + 확약 30↑(10) + 유통 200억↓(10) + 괴리 160↑(6) = 31점
     r = _score(550, 35, 150, 200)
     assert r["scores"] == {"inst_competition": 5, "lockup_ratio": 10,
-                           "circulating": 10, "otc_premium": 6, "simultaneous": 0}
+                           "circulating": 10, "otc_premium": 6}
     assert r["total"] == 31
 
 
@@ -77,10 +77,23 @@ def test_otc_penalty():
     assert r["scores"]["otc_premium"] == -3
 
 
-def test_simultaneous_penalty():
-    base = _score(550, 35, 150, 200, simul=False)["total"]
-    with_penalty = _score(550, 35, 150, 200, simul=True)["total"]
-    assert with_penalty == base - 2
+def test_simultaneous_overrides_otc():
+    # 동시상장이면 괴리율(+160%→6)과 무관하게 장외 칸 = -2 (합산이 아니라 대체)
+    r = _score(550, 35, 150, 200, simul=True)
+    assert r["scores"]["otc_premium"] == -2
+    assert r["total"] == 5 + 10 + 10 - 2   # 23
+    assert r["is_simultaneous"] is True
+
+
+def test_otc_missing_penalty():
+    # 장외 시세 없음(매도/매수호가 중 하나라도 없음) → 장외 칸 -2
+    metrics = {
+        "inst_competition": 550.0, "lockup_ratio": 35.0, "circulating_eok": 150.0,
+        "otc_premium": None, "otc_missing": True, "raw_verified": True,
+    }
+    r = evaluator.evaluate_ipo_score(metrics)
+    assert r["scores"]["otc_premium"] == -2
+    assert r["total"] == 5 + 10 + 10 - 2   # 23
 
 
 # ---------------------------------------------------------------------------
@@ -95,11 +108,21 @@ def test_grade_recommendation():
 
 
 # ---------------------------------------------------------------------------
-# 절미평균 (scraper 로직 직접 검증 — 함수 추출 없이 동일 알고리즘 확인)
+# 장외 호가 이상치 제거 (scraper._reject_otc_outliers)
 # ---------------------------------------------------------------------------
-def test_trimmed_mean_logic():
-    prices = [64000, 58000, 57000, 100, 99999]  # 최저 100, 최고 99999 제외
-    prices.sort()
-    trimmed = prices[1:-1]
-    assert trimmed == [57000, 58000, 64000]
-    assert sum(trimmed) / len(trimmed) == 59666.666666666664
+def test_reject_otc_outliers():
+    from analyzer.scraper import _reject_otc_outliers
+
+    # 대부분 5~6만인데 10만(터무니없는 매도)·2만(헐값 매수) 섞임 → 둘 다 제외
+    prices = [55000, 57000, 58000, 60000, 100000, 20000]
+    kept = sorted(_reject_otc_outliers(prices))
+    assert kept == [55000, 57000, 58000, 60000]
+    assert sum(kept) / len(kept) == 57500.0
+
+
+def test_reject_otc_outliers_small_sample():
+    from analyzer.scraper import _reject_otc_outliers
+
+    # 3개 미만이면 중앙값 신뢰 불가 → 원본 유지(0·None 만 정리)
+    assert _reject_otc_outliers([50000, 90000]) == [50000, 90000]
+    assert _reject_otc_outliers([50000, None, 0, 60000]) == [50000, 60000]

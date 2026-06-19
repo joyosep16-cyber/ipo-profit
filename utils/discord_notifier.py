@@ -240,7 +240,8 @@ def send_analysis_score(detail: dict, result: dict, metrics: dict) -> None:
         desc = (f"{result.get('emoji','')} **{result.get('verdict','')}** — {result.get('grade','')}\n"
                 f"📌 {result.get('action','')}\n💰 {result.get('expected_return','')}")
         fields.append({"name": "유통가능규모", "value": f"약 {metrics['circulating_eok']:,.0f}억원", "inline": True})
-        fields.append({"name": "장외 괴리율", "value": _fmt_premium(metrics["otc_premium"]), "inline": True})
+        otc_str = "없음 (장외 -2)" if metrics.get("otc_missing") else _fmt_premium(metrics["otc_premium"])
+        fields.append({"name": "장외 괴리율", "value": otc_str, "inline": True})
         footer = f"가이드라인 총점: {total}점 | {result.get('expected_return','')}"
 
     fields.append({"name": "상장 예정일", "value": str(detail.get("listing_date") or "-"), "inline": True})

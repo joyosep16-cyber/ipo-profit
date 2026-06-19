@@ -5,14 +5,14 @@
 가이드 스코어링(총점/추천 등급)을 카드로 표시한다.
 스팩/리츠는 점수 산정에서 제외하고 안내만 표시한다.
 """
-from datetime import date, datetime
+from datetime import datetime
 
 import streamlit as st
 
 from database import add_watchlist_item, get_setting
 from utils.constants import WATCHLIST_STATUS_INTERESTED
 from utils import discord_notifier
-from analyzer import scraper, service
+from analyzer import evaluator, scraper, service
 
 st.title("🔍 공모주 분석")
 st.caption("38커뮤니케이션 수요예측 결과 + DART 교차검증 기반 점수 분석")
@@ -48,9 +48,9 @@ def _parse_date(s):
 def _render_score_card(bundle: dict) -> None:
     merged = bundle["merged"]
     metrics = bundle["metrics"]
-    result = bundle["result"]
     is_spac = bundle["is_spac"]
     name = bundle["name"]
+    result = bundle["result"]   # 기본 결과(동시상장 미적용). 아래에서 토글로 재계산.
 
     # 스팩/리츠는 분석 대상에서 아예 제외 — 안내만 표시
     if is_spac:
@@ -89,7 +89,10 @@ def _render_score_card(bundle: dict) -> None:
     else:
         m3.metric("유통가능규모", f"{metrics['circulating_eok']:,.0f}억원")
         prem = metrics["otc_premium"]
-        m4.metric("장외 괴리율", f"{prem:+.2f}%" if prem is not None else "N/A")
+        if metrics.get("otc_missing"):
+            m4.metric("장외 괴리율", "없음", help="매도호가·매수호가가 모두 있어야 시세로 인정 (없으면 -2점)")
+        else:
+            m4.metric("장외 괴리율", f"{prem:+.2f}%" if prem is not None else "N/A")
 
     # 데이터 신뢰도
     if merged.get("data_quality"):
@@ -107,6 +110,18 @@ def _render_score_card(bundle: dict) -> None:
         st.markdown("**주관사별 최소 증거금**\n\n" + "\n\n".join(lines))
 
     st.divider()
+
+    # 동시상장 토글 — 같은 상장일에 동시상장 종목이 있으면 장외 칸 -2 (무조건).
+    # 38에 종목별 상장일 목록이 없어 자동 판정이 어려우므로 수동 지정한다.
+    # (무거운 크롤링은 캐시하고 점수만 재계산 → 체크 즉시 반영)
+    if not is_spac:
+        is_simul = st.checkbox(
+            "📅 동시상장 (같은 날 상장하는 다른 종목 있음) → 장외 -2점",
+            key=f"simul_{bundle['no']}",
+            help="상장 예정일이 같은 종목이 있으면 체크하세요. 장외가격 점수가 -2로 대체됩니다.")
+        # 캐시된 bundle 을 변형하지 않도록 지역 변수에만 재계산 결과 보관
+        result = evaluator.evaluate_ipo_score(
+            metrics, is_simultaneous=is_simul, is_spac_reit=is_spac)
 
     # 점수 / 추천
     if is_spac:
@@ -171,8 +186,9 @@ with tab_list:
             with st.spinner("분석 중... (크롤링·DART 조회로 수 초 소요)"):
                 bundle = _cached_analyze(candidates[idx]["no"])
             if bundle:
-                _render_score_card(bundle)
+                st.session_state["analysis_bundle"] = bundle
             else:
+                st.session_state.pop("analysis_bundle", None)
                 st.error("분석 실패 — 공시 대기 종목이거나 데이터가 아직 없습니다.")
 
 with tab_search:
@@ -186,6 +202,13 @@ with tab_search:
                 no = service.find_no_by_name(query.strip())
                 bundle = _cached_analyze(no) if no else None
         if bundle:
-            _render_score_card(bundle)
+            st.session_state["analysis_bundle"] = bundle
         else:
+            st.session_state.pop("analysis_bundle", None)
             st.error("종목을 찾지 못했거나 분석 실패. (청약일정 외 종목은 고유번호로 검색하세요)")
+
+# 분석 결과 카드 — 탭 밖에서 렌더해야 동시상장 체크박스 상호작용에도 카드가 유지된다.
+_bundle = st.session_state.get("analysis_bundle")
+if _bundle:
+    st.divider()
+    _render_score_card(_bundle)

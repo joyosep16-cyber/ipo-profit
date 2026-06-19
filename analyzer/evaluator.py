@@ -135,7 +135,13 @@ def build_metrics(detail: dict, otc_price: Optional[float],
         circ_value = circulating_value(detail.get("circulating_shares") or 0, confirmed_price)
 
     # 스팩/리츠는 장외 거래가 없으므로 괴리율 미산정(None)
-    premium = None if skip_otc else otc_premium(otc_price, confirmed_price)
+    # 일반 종목인데 otc_price 가 None 이면 '장외 시세 없음'(매도호가 없음 등) → 괴리율 None
+    if skip_otc or otc_price is None:
+        premium = None
+    else:
+        premium = otc_premium(otc_price, confirmed_price)
+    # 장외 시세 없음: 스팩/리츠가 아닌데 장외가가 없는 경우(점수 -2 대상)
+    otc_missing = (not skip_otc) and (otc_price is None)
 
     # 주관사별 증거금 계산 (min_qty_map이 없으면 빈 dict)
     min_qty_map = detail.get("min_qty_map") or {}
@@ -146,8 +152,9 @@ def build_metrics(detail: dict, otc_price: Optional[float],
         "lockup_ratio": lockup,
         "circulating_value": circ_value,             # 원 단위
         "circulating_eok": circ_value / config.EOK,  # 억 단위 (억=1억=100,000,000원)
-        "otc_premium": premium,                      # 스팩/리츠 → None (N/A)
+        "otc_premium": premium,                      # 스팩/리츠·장외없음 → None (N/A)
         "otc_price": None if skip_otc else otc_price,
+        "otc_missing": otc_missing,                  # 일반 종목인데 장외 시세 없음
         "confirmed_price": confirmed_price,
         "raw_verified": detail.get("raw_verified", False),
         "deposit_map": deposit_map,  # {"NH투자증권": {"min_qty":10,"estimated":True,"deposit":107500}}
@@ -174,13 +181,21 @@ def _score_le(value: float, table: list[tuple]) -> int:
     return 0
 
 
-def _score_otc(premium) -> int:
-    """장외 괴리율 점수: +160%↑=6, +100%↑=3, +50%↑=0, +50%미만=-3.
+def _score_otc(premium, is_simultaneous: bool = False,
+               otc_missing: bool = False) -> int:
+    """장외가격 칸 단일 점수(합산 아님). 우선순위로 하나만 적용한다.
 
-    premium 이 None(장외 정보 없음)이면 감점 대신 0점(중립) 처리 — 방어 로직.
+      1) 동시상장(같은 상장일 종목 존재) → -2  (괴리율과 무관하게 무조건)
+      2) 장외 시세 없음(매도호가 없음)    → -2
+      3) 괴리율 기반: +160%↑=6, +100%↑=3, +50%↑=0, +50%미만=-3
+
+    분석가 채점표에서 '동시상장'은 장외가격 칸의 한 값이므로, 괴리율 점수에
+    더하지 않고 대체한다.
     """
-    if premium is None:
-        return 0
+    if is_simultaneous:
+        return config.SCORE_SIMULTANEOUS_PENALTY   # -2 (최우선)
+    if otc_missing or premium is None:
+        return config.SCORE_OTC_MISSING            # -2 (장외 없음)
     for threshold, score in config.SCORE_OTC_PREMIUM:  # [(160,6),(100,3),(50,0)]
         if premium >= threshold:
             return score
@@ -216,10 +231,11 @@ def evaluate_ipo_score(metrics: dict, is_simultaneous: bool = False,
     s_comp = _score_ge(metrics["inst_competition"], config.SCORE_INST_COMPETITION)
     s_lockup = _score_ge(metrics["lockup_ratio"], config.SCORE_LOCKUP)
     s_circ = _score_le(metrics["circulating_eok"], config.SCORE_CIRCULATING_EOK)
-    s_otc = _score_otc(metrics["otc_premium"])
-    s_simul = config.SCORE_SIMULTANEOUS_PENALTY if is_simultaneous else 0
+    # 장외가격 칸 = 단일 점수(동시상장 > 장외없음 > 괴리율). 별도 합산 항목 없음.
+    s_otc = _score_otc(metrics["otc_premium"], is_simultaneous=is_simultaneous,
+                       otc_missing=metrics.get("otc_missing", False))
 
-    total = s_comp + s_lockup + s_circ + s_otc + s_simul
+    total = s_comp + s_lockup + s_circ + s_otc
     recommendation = grade_recommendation(total)
 
     return {
@@ -227,8 +243,7 @@ def evaluate_ipo_score(metrics: dict, is_simultaneous: bool = False,
             "inst_competition": s_comp,
             "lockup_ratio": s_lockup,
             "circulating": s_circ,
-            "otc_premium": s_otc,
-            "simultaneous": s_simul,
+            "otc_premium": s_otc,   # 동시상장/장외없음/괴리율 중 하나가 반영된 단일 점수
         },
         "total": total,
         "is_simultaneous": is_simultaneous,

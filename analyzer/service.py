@@ -10,8 +10,12 @@ from analyzer.net import logger
 from analyzer.normalizer import is_same_company
 
 
-def analyze_by_no(no: str) -> Optional[dict]:
+def analyze_by_no(no: str, is_simultaneous: bool = False) -> Optional[dict]:
     """고유번호(no)로 1종목 분석. 결과 번들 dict 반환, 실패 시 None.
+
+    is_simultaneous: 같은 상장일에 동시상장하는 종목이 있으면 True (장외 칸 -2).
+      38에 종목별 상장일 목록이 없어 자동 판정이 어렵기에, 사용자가 수동 지정한다.
+      (분석 페이지의 '동시상장' 체크박스에서 점수만 재계산하므로 기본값 False)
 
     반환: {"merged", "metrics", "result", "is_spac", "name"}
       - merged: scraper.fetch_detail + merge_sources (data_quality 포함)
@@ -41,7 +45,7 @@ def analyze_by_no(no: str) -> Optional[dict]:
         )
 
     metrics = evaluator.build_metrics(merged, otc_price, skip_otc=is_spac)
-    result = evaluator.evaluate_ipo_score(metrics, is_simultaneous=False,
+    result = evaluator.evaluate_ipo_score(metrics, is_simultaneous=is_simultaneous,
                                           is_spac_reit=is_spac)
 
     return {"merged": merged, "metrics": metrics, "result": result,

@@ -33,6 +33,7 @@ REQUEST_TIMEOUT = 10                # 요청 타임아웃(초)
 SCORE_THRESHOLD = 16                # 이 점수 이상이면 Discord 자동 알림 (기본값)
 EXCLUDE_KEYWORDS = ["스팩", "호스팩", "리츠"]            # 스코어링 제외 키워드
 SITE_ENCODING = "euc-kr"            # 38커뮤니케이션 인코딩
+OTC_OUTLIER_TOL = 0.40              # 장외 호가 이상치 제거 밴드: 중앙값 대비 ±40% 벗어나면 제외
 
 # Discord Embed 기본 색상
 EMBED_COLOR = 0x00FF00              # 초록색 (#00FF00)
@@ -45,7 +46,9 @@ SCORE_LOCKUP = [(30, 10), (20, 8), (15, 6), (10, 4), (5, 2)]                 # >
 SCORE_CIRCULATING_EOK = [(200, 10), (500, 6), (1000, 4), (2000, 2), (3000, 1)]  # <=
 SCORE_OTC_PREMIUM = [(160, 6), (100, 3), (50, 0)]   # >= ; 50 미만은 별도 -3
 SCORE_OTC_PENALTY = -3                               # +50% 미만 감점
+SCORE_OTC_MISSING = -2                               # 장외 시세 없음(매도호가 없음) 감점
 SCORE_SIMULTANEOUS_PENALTY = -2                      # 동시상장 감점
+# 장외가격 칸은 단일 점수: 동시상장 > 장외없음 > 괴리율 순으로 하나만 적용(합산 아님)
 
 # 1억 = 100,000,000원
 EOK = 100_000_000
