@@ -493,13 +493,38 @@ def _parse_inst_demand(soup: BeautifulSoup) -> Optional[float]:
     return None
 
 
+def _circ_pair_in_cells(cells: list) -> Optional[float]:
+    """셀 텍스트 리스트에서 (大숫자A)(X%)(大숫자B)(Y%) 패턴 중
+    두 비율 합이 ~100% 인 쌍을 찾아 두 번째 값(유통가능주식수)을 반환.
+    (매각제한물량% + 유통가능물량% = 100)
+    """
+    for i in range(len(cells) - 3):
+        n1 = parse_number(cells[i])
+        n2 = parse_number(cells[i + 2])
+        t1, t2 = cells[i + 1], cells[i + 3]
+        if not (n1 and n2 and "%" in t1 and "%" in t2):
+            continue
+        # 유효 주식수 범위 체크 (재무제표 대형 수치 배제)
+        if not (100_000 <= n1 <= 100_000_000 and 100_000 <= n2 <= 100_000_000):
+            continue
+        p1 = parse_number(t1)
+        p2 = parse_number(t2)
+        if not (p1 and p2):
+            continue
+        if 99 <= p1 + p2 <= 101:
+            return n2   # 두 번째 값 = 유통가능주식수
+    return None
+
+
 def _parse_circulating(soup: BeautifulSoup) -> Optional[float]:
     """주주현황 표에서 공모 후 유통가능주식수(합계) 추출.
 
     [버그 수정 내역]
-    - 구 버전: 외부 래퍼 테이블의 컬럼 인덱스가 재무제표 수치(수백억)를 가리켜 오파싱
-    [수정] 셀 순차 탐색으로 lock-up합계 + 유통합계 쌍을 찾는 방식으로 전환
-    탐색 패턴: (大숫자A) (X%) (大숫자B) (Y%) where X + Y ≈ 100
+    - 외부 래퍼 테이블의 컬럼 인덱스가 재무제표 수치를 가리켜 오파싱 → 셀 패턴 탐색으로 전환
+    - 셀 전체를 순차 탐색하면 '소계' 행의 (공모전 지분율 + 공모후 지분율)이 우연히
+      ~100% 가 되어 조기 오매칭(예: 스트라드비전 최대주주 53.65%+46.45%=100.1%).
+    [수정] **합계 행을 우선** 탐색해 그 안에서만 (매각제한% + 유통%)=100 쌍을 찾는다.
+      합계 행이 없을 때만 표 전체를 폴백 탐색(이때는 마지막=합계에 가까운 쌍 우선).
 
     대상 테이블: "유통가능물량" + ("주주명" 또는 "성명") 포함 (주주현황 표)
       ※ 재상장·이전상장 종목은 라벨이 "성명"인 경우가 있어 둘 다 허용한다.
@@ -512,27 +537,24 @@ def _parse_circulating(soup: BeautifulSoup) -> Optional[float]:
         if "주주명" not in ttext and "성명" not in ttext:
             continue
 
-        cells = table.find_all(["td", "th"])
-        # 셀 순차 탐색: 大숫자 → % → 大숫자 → % 패턴에서 두 %의 합이 ~100%인 쌍 탐색
-        for i in range(len(cells) - 3):
-            n1 = parse_number(cells[i].get_text(strip=True))
-            t1 = cells[i + 1].get_text(strip=True)
-            n2 = parse_number(cells[i + 2].get_text(strip=True))
-            t2 = cells[i + 3].get_text(strip=True)
+        # 1순위: '합계' 행에서만 탐색 (소계 오매칭 방지)
+        for row in table.find_all("tr"):
+            cells = [c.get_text(strip=True) for c in row.find_all(["td", "th"])]
+            cells = [c for c in cells if c]
+            if cells and cells[0].replace(" ", "").startswith("합계"):
+                v = _circ_pair_in_cells(cells)
+                if v is not None:
+                    return v
 
-            if not (n1 and n2 and "%" in t1 and "%" in t2):
-                continue
-            # 유효 주식수 범위 체크 (재무제표 대형 수치 배제)
-            if not (100_000 <= n1 <= 100_000_000 and 100_000 <= n2 <= 100_000_000):
-                continue
-            p1 = parse_number(t1)
-            p2 = parse_number(t2)
-            if not (p1 and p2):
-                continue
-            # 두 비율의 합이 정확히 99~101% 여야 lock-up 합계 + 유통가능 합계 쌍
-            # (주주별 소계는 기준이 달라 104~106%로 벗어남 → 제외)
-            if 99 <= p1 + p2 <= 101:
-                return n2   # 두 번째 값 = 유통가능주식수 합계
+        # 2순위(폴백): 표 전체 셀 — 마지막(=합계에 가까운) 매칭을 우선
+        all_cells = [c.get_text(strip=True) for c in table.find_all(["td", "th"])]
+        last = None
+        for i in range(len(all_cells) - 3):
+            v = _circ_pair_in_cells(all_cells[i:i + 4])
+            if v is not None:
+                last = v
+        if last is not None:
+            return last
 
     return None
 
