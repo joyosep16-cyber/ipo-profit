@@ -90,23 +90,27 @@ def merge_sources(scraper_data: dict, dart_data: Optional[dict]) -> dict:
         return {**scraper_data, "data_quality": "🔴 38 폴백(추정치)"}
 
     merged = dict(scraper_data)
-
-    # DART 수치로 덮어쓰기 (원본 수량 확보됨으로 마킹)
-    merged["inst_total_demand"] = dart_data["inst_total_demand"]
-    merged["lockup_qty"] = dart_data["lockup_qty"]
-    if dart_data.get("inst_allocation"):
-        merged["inst_allocation"] = dart_data["inst_allocation"]
-    merged["raw_verified"] = True   # DART 원본 수량 확보 → 산식 직접 계산 경로 활성화
     merged["dart_rcept_no"] = dart_data.get("rcept_no", "")
+
+    d_total = dart_data.get("inst_total_demand")
+    # 수요예측 원본 수량을 DART가 확보한 경우에만 덮어쓰기 + 원본검증 마킹
+    if d_total:
+        merged["inst_total_demand"] = d_total
+        merged["lockup_qty"] = dart_data.get("lockup_qty")
+        if dart_data.get("inst_allocation"):
+            merged["inst_allocation"] = dart_data["inst_allocation"]
+        merged["raw_verified"] = True   # DART 원본 수량 확보 → 산식 직접 계산 경로 활성화
+
+    # 유통가능주식수: 38이 못 가져온 경우(None) DART 값으로 보완
+    if scraper_data.get("circulating_shares") is None and dart_data.get("circulating_shares"):
+        merged["circulating_shares"] = dart_data["circulating_shares"]
 
     # 두 소스 수치 비교 (10% 오차 허용)
     s_total = scraper_data.get("inst_total_demand")
-    d_total = dart_data["inst_total_demand"]
     if s_total and d_total:
         diff_ratio = abs(s_total - d_total) / d_total
         merged["data_quality"] = "🟢 일치" if diff_ratio < 0.10 else "🟡 DART 보정됨"
     else:
-        # 38 수치 자체가 없었던 경우
         merged["data_quality"] = "🟡 DART 보정됨"
 
     return merged
