@@ -85,6 +85,19 @@ def test_simultaneous_overrides_otc():
     assert r["is_simultaneous"] is True
 
 
+def test_circulating_missing_no_bonus():
+    # 유통가능물량 데이터 없음(circulating_missing) → 0억이라도 만점(10) 주지 않고 0점
+    metrics = {
+        "inst_competition": 550.0, "lockup_ratio": 35.0, "circulating_eok": 0.0,
+        "circulating_missing": True, "otc_premium": 200.0, "raw_verified": True,
+    }
+    r = evaluator.evaluate_ipo_score(metrics)
+    assert r["scores"]["circulating"] == 0
+    # 수동 입력으로 보정하면 정상 채점
+    m2 = {**metrics, "circulating_eok": 150.0, "circulating_missing": False}
+    assert evaluator.evaluate_ipo_score(m2)["scores"]["circulating"] == 10
+
+
 def test_otc_missing_penalty():
     # 장외 시세 없음(매도/매수호가 중 하나라도 없음) → 장외 칸 -2
     metrics = {

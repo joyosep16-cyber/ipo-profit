@@ -143,6 +143,10 @@ def build_metrics(detail: dict, otc_price: Optional[float],
     # 장외 시세 없음: 스팩/리츠가 아닌데 장외가가 없는 경우(점수 -2 대상)
     otc_missing = (not skip_otc) and (otc_price is None)
 
+    # 유통가능물량 데이터 없음: 38 상세에 주주현황(유통가능물량) 표가 없는 종목.
+    # circ_value 0 을 그대로 두면 _score_le 가 만점(10점)을 줘 과대평가되므로 플래그로 구분.
+    circulating_missing = detail.get("circulating_shares") is None
+
     # 주관사별 증거금 계산 (min_qty_map이 없으면 빈 dict)
     min_qty_map = detail.get("min_qty_map") or {}
     deposit_map = build_deposit_map(confirmed_price, min_qty_map)
@@ -152,6 +156,7 @@ def build_metrics(detail: dict, otc_price: Optional[float],
         "lockup_ratio": lockup,
         "circulating_value": circ_value,             # 원 단위
         "circulating_eok": circ_value / config.EOK,  # 억 단위 (억=1억=100,000,000원)
+        "circulating_missing": circulating_missing,  # 38에 유통가능물량 표 없음
         "otc_premium": premium,                      # 스팩/리츠·장외없음 → None (N/A)
         "otc_price": None if skip_otc else otc_price,
         "otc_missing": otc_missing,                  # 일반 종목인데 장외 시세 없음
@@ -230,7 +235,11 @@ def evaluate_ipo_score(metrics: dict, is_simultaneous: bool = False,
 
     s_comp = _score_ge(metrics["inst_competition"], config.SCORE_INST_COMPETITION)
     s_lockup = _score_ge(metrics["lockup_ratio"], config.SCORE_LOCKUP)
-    s_circ = _score_le(metrics["circulating_eok"], config.SCORE_CIRCULATING_EOK)
+    # 유통가능물량 데이터가 없으면 만점(0억→10점) 오부여 방지 → 0점(중립). 수동 입력으로 보정.
+    if metrics.get("circulating_missing") and not metrics.get("circulating_eok"):
+        s_circ = 0
+    else:
+        s_circ = _score_le(metrics["circulating_eok"], config.SCORE_CIRCULATING_EOK)
     # 장외가격 칸 = 단일 점수(동시상장 > 장외없음 > 괴리율). 별도 합산 항목 없음.
     s_otc = _score_otc(metrics["otc_premium"], is_simultaneous=is_simultaneous,
                        otc_missing=metrics.get("otc_missing", False))

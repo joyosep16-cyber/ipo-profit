@@ -87,7 +87,10 @@ def _render_score_card(bundle: dict) -> None:
         m3.metric("유통가능규모", "N/A")
         m4.metric("장외 괴리율", "N/A")
     else:
-        m3.metric("유통가능규모", f"{metrics['circulating_eok']:,.0f}억원")
+        if metrics.get("circulating_missing") and not metrics.get("circulating_eok"):
+            m3.metric("유통가능규모", "N/A", help="38에 유통가능물량 표가 없는 종목. 아래에서 수동 입력하세요.")
+        else:
+            m3.metric("유통가능규모", f"{metrics['circulating_eok']:,.0f}억원")
         prem = metrics["otc_premium"]
         if metrics.get("otc_missing"):
             m4.metric("장외 괴리율", "없음", help="매도호가·매수호가가 모두 있어야 시세로 인정 (없으면 -2점)")
@@ -119,9 +122,23 @@ def _render_score_card(bundle: dict) -> None:
             "📅 동시상장 (같은 날 상장하는 다른 종목 있음) → 장외 -2점",
             key=f"simul_{bundle['no']}",
             help="상장 예정일이 같은 종목이 있으면 체크하세요. 장외가격 점수가 -2로 대체됩니다.")
+
+        # 유통가능물량 데이터가 38에 없는 종목은 수동 입력으로 보정 (분석가/DART 값)
+        score_metrics = metrics
+        if metrics.get("circulating_missing") and not metrics.get("circulating_eok"):
+            st.warning("⚠️ 38에 유통가능물량 표가 없어 자동 산출이 안 됩니다. "
+                       "아래에 값을 입력하면 점수에 반영됩니다. (미입력 시 유통 0점)")
+            manual_eok = st.number_input(
+                "유통가능규모 수동 입력 (억원)", min_value=0.0, value=0.0, step=10.0,
+                key=f"circ_{bundle['no']}",
+                help="분석가 자료나 DART 증권신고서의 '공모 후 유통가능물량' 금액(억원)을 입력")
+            if manual_eok > 0:
+                score_metrics = {**metrics, "circulating_eok": manual_eok,
+                                 "circulating_missing": False}
+
         # 캐시된 bundle 을 변형하지 않도록 지역 변수에만 재계산 결과 보관
         result = evaluator.evaluate_ipo_score(
-            metrics, is_simultaneous=is_simul, is_spac_reit=is_spac)
+            score_metrics, is_simultaneous=is_simul, is_spac_reit=is_spac)
 
     # 점수 / 추천
     if is_spac:
