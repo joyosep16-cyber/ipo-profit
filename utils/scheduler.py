@@ -56,17 +56,53 @@ def _watchlist_reminder_job() -> None:
         print(f"[Scheduler] watchlist_reminder_job error: {e}")
 
 
-def _run_listing_alert(target_date, notif_type: str, sender) -> None:
-    """청약완료 종목 중 상장일이 target_date 인 종목에 sender 알림 발송.
+def _pending_listing_candidates() -> list:
+    """청약 신청했으나 아직 상장(매도) 전인 종목 후보 — 상장일 보유 건만.
 
-    NotificationLog(notif_type, {id}-{상장일})로 중복 발송 방지. D-day/D-1
-    공통 로직."""
-    from database import get_watchlist, is_notified, log_notification
+    두 소스를 (종목명, 상장일) 기준으로 중복 제거해 합친다:
+      (1) 관심목록 '청약완료' (listing_date 보유) — 분석점수까지 포함
+      (2) IPORecord 당첨 & 매도가 미입력(sell_price 0/None) & 상장일(sell_date) 보유
+          → "청약 신청 후 아직 매도가를 안 적은" 보유 종목 (사용자 제안 기준)
+    같은 종목이 양쪽에 있으면 (1)을 우선(분석점수 보존)."""
+    from database import get_watchlist, get_records
 
-    for item in get_watchlist(status=WATCHLIST_STATUS_SUBSCRIBED):
-        if item.get("listing_date") != target_date:
+    by_key: dict = {}
+    for w in get_watchlist(status=WATCHLIST_STATUS_SUBSCRIBED):
+        ld = w.get("listing_date")
+        if not ld:
             continue
-        ref_key = f"{item['id']}-{item['listing_date']}"
+        by_key.setdefault((w["stock_name"], ld), {
+            "stock_name": w["stock_name"], "broker": w.get("broker"),
+            "listing_date": ld, "ipo_price": w.get("ipo_price"),
+            "analysis_score": w.get("analysis_score"), "analysis_grade": w.get("analysis_grade"),
+        })
+    for r in get_records():
+        if r.get("sub_result") == "미당첨":   # 미당첨은 보유 물량 없음
+            continue
+        if r.get("sell_price"):               # 매도가 입력됨 → 이미 매도/상장 지남
+            continue
+        ld = r.get("sell_date")               # input 페이지 '🏛️ 상장일' = sell_date
+        if not ld:
+            continue
+        by_key.setdefault((r["stock_name"], ld), {
+            "stock_name": r["stock_name"], "broker": r.get("broker"),
+            "listing_date": ld, "ipo_price": r.get("ipo_price"),
+            "analysis_score": None, "analysis_grade": None,
+        })
+    return list(by_key.values())
+
+
+def _run_listing_alert(target_date, notif_type: str, sender) -> None:
+    """상장일이 target_date 인 '청약 후 미상장' 후보에 sender 알림 발송.
+
+    NotificationLog(notif_type, {종목명}-{상장일})로 중복 발송 방지(소스 무관).
+    D-day/D-1 공통 로직."""
+    from database import is_notified, log_notification
+
+    for item in _pending_listing_candidates():
+        if item["listing_date"] != target_date:
+            continue
+        ref_key = f"{item['stock_name']}-{item['listing_date']}"
         if is_notified(notif_type, ref_key):
             continue
         sender(item)
