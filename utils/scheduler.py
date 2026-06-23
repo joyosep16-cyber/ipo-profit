@@ -137,7 +137,7 @@ def _listing_dday_job() -> None:
 
 
 def _pending_summary_job() -> None:
-    """청약 후 상장 대기(미상장) 보유 종목 주간 요약 — 매주 월 09:00 + 그 주 첫 접속 시.
+    """청약 후 상장 대기(미상장) 보유 종목 주간 요약 — 매주 월 08:00 + 그 주 첫 접속 시.
 
     ISO 주(YYYY-Www) 단위로 중복 발송 방지. 상장일이 오늘 이후인 종목만 묶어 1건 발송."""
     try:
@@ -218,8 +218,8 @@ def start_scheduler() -> BackgroundScheduler:
     scheduler.add_job(_listing_dday_job, "cron", hour=18, minute=0)
     # 청약 신청 종목 상장 당일 알림 — 매일 08:00 (장 시작 전)
     scheduler.add_job(_listing_day_job, "cron", hour=8, minute=0)
-    # 청약 후 상장 대기 종목 주간 요약 — 매주 월 09:00
-    scheduler.add_job(_pending_summary_job, "cron", day_of_week="mon", hour=9, minute=0)
+    # 청약 후 상장 대기 종목 주간 요약 — 매주 월 08:00
+    scheduler.add_job(_pending_summary_job, "cron", day_of_week="mon", hour=8, minute=0)
     # 수요예측 분석 자동알림 — 매일 14·15·16·17시
     scheduler.add_job(_analysis_alert_job, "cron", hour="14,15,16,17", minute=0)
     scheduler.start()
