@@ -56,6 +56,23 @@ def _watchlist_reminder_job() -> None:
         print(f"[Scheduler] watchlist_reminder_job error: {e}")
 
 
+def _run_listing_alert(target_date, notif_type: str, sender) -> None:
+    """청약완료 종목 중 상장일이 target_date 인 종목에 sender 알림 발송.
+
+    NotificationLog(notif_type, {id}-{상장일})로 중복 발송 방지. D-day/D-1
+    공통 로직."""
+    from database import get_watchlist, is_notified, log_notification
+
+    for item in get_watchlist(status=WATCHLIST_STATUS_SUBSCRIBED):
+        if item.get("listing_date") != target_date:
+            continue
+        ref_key = f"{item['id']}-{item['listing_date']}"
+        if is_notified(notif_type, ref_key):
+            continue
+        sender(item)
+        log_notification(notif_type, ref_key)
+
+
 def _listing_day_job() -> None:
     """청약 신청(청약완료)한 종목 중 오늘 상장하는 종목 Discord 알림.
 
@@ -65,20 +82,22 @@ def _listing_day_job() -> None:
     """
     try:
         from datetime import date
-        from database import get_watchlist, is_notified, log_notification
         from utils.discord_notifier import send_listing_day_alert
-
-        today = date.today()
-        for item in get_watchlist(status=WATCHLIST_STATUS_SUBSCRIBED):
-            if item.get("listing_date") != today:
-                continue
-            ref_key = f"{item['id']}-{item['listing_date']}"
-            if is_notified("listing_day", ref_key):
-                continue
-            send_listing_day_alert(item)
-            log_notification("listing_day", ref_key)
+        _run_listing_alert(date.today(), "listing_day", send_listing_day_alert)
     except Exception as e:
         print(f"[Scheduler] listing_day_job error: {e}")
+
+
+def _listing_dday_job() -> None:
+    """청약 신청(청약완료)한 종목 중 내일 상장하는 종목 D-1 Discord 미리 알림.
+
+    매일 18:00 cron + 앱 접속 시 1회(init_app) 호출. 중복 방지는 _listing_day_job 과 동일."""
+    try:
+        from datetime import date, timedelta
+        from utils.discord_notifier import send_listing_dday_alert
+        _run_listing_alert(date.today() + timedelta(days=1), "listing_dday", send_listing_dday_alert)
+    except Exception as e:
+        print(f"[Scheduler] listing_dday_job error: {e}")
 
 
 def _analysis_alert_job() -> None:
@@ -134,6 +153,8 @@ def start_scheduler() -> BackgroundScheduler:
     scheduler.add_job(_monthly_summary_job,   "cron", day=1, hour=9, minute=0)
     scheduler.add_job(_watchlist_check_job,   "cron", hour=0, minute=0)
     scheduler.add_job(_watchlist_reminder_job, "cron", hour=9, minute=0)
+    # 청약 신청 종목 상장 D-1 미리 알림 — 매일 18:00 (전날 저녁)
+    scheduler.add_job(_listing_dday_job, "cron", hour=18, minute=0)
     # 청약 신청 종목 상장 당일 알림 — 매일 08:30 (장 시작 전)
     scheduler.add_job(_listing_day_job, "cron", hour=8, minute=30)
     # 수요예측 분석 자동알림 — 매일 14·15·16·17시
