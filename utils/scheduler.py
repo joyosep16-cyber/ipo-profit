@@ -136,6 +136,31 @@ def _listing_dday_job() -> None:
         print(f"[Scheduler] listing_dday_job error: {e}")
 
 
+def _pending_summary_job() -> None:
+    """청약 후 상장 대기(미상장) 보유 종목 주간 요약 — 매주 월 09:00 + 그 주 첫 접속 시.
+
+    ISO 주(YYYY-Www) 단위로 중복 발송 방지. 상장일이 오늘 이후인 종목만 묶어 1건 발송."""
+    try:
+        from datetime import date
+        from database import is_notified, log_notification
+        from utils.discord_notifier import send_pending_holdings_summary
+
+        today = date.today()
+        iso = today.isocalendar()
+        ref_key = f"{iso[0]}-W{iso[1]:02d}"
+        if is_notified("pending_summary", ref_key):
+            return
+        pending = [it for it in _pending_listing_candidates()
+                   if it.get("listing_date") and it["listing_date"] >= today]
+        if not pending:
+            return
+        pending.sort(key=lambda x: x["listing_date"])
+        send_pending_holdings_summary(pending)
+        log_notification("pending_summary", ref_key)
+    except Exception as e:
+        print(f"[Scheduler] pending_summary_job error: {e}")
+
+
 def _analysis_alert_job() -> None:
     """매일 14·15·16·17시 — 청약일정 종목 수요예측 분석 후 16점+ Discord 자동 알림.
 
@@ -193,6 +218,8 @@ def start_scheduler() -> BackgroundScheduler:
     scheduler.add_job(_listing_dday_job, "cron", hour=18, minute=0)
     # 청약 신청 종목 상장 당일 알림 — 매일 08:30 (장 시작 전)
     scheduler.add_job(_listing_day_job, "cron", hour=8, minute=30)
+    # 청약 후 상장 대기 종목 주간 요약 — 매주 월 09:00
+    scheduler.add_job(_pending_summary_job, "cron", day_of_week="mon", hour=9, minute=0)
     # 수요예측 분석 자동알림 — 매일 14·15·16·17시
     scheduler.add_job(_analysis_alert_job, "cron", hour="14,15,16,17", minute=0)
     scheduler.start()

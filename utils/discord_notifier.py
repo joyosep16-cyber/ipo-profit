@@ -195,6 +195,36 @@ def send_listing_dday_alert(item: dict) -> None:
     })
 
 
+def send_pending_holdings_summary(items: list) -> None:
+    """청약 후 상장 대기 중(미상장)인 보유 종목 주간 요약 Discord 알림.
+
+    items: _pending_listing_candidates() 중 상장일이 오늘 이후인 종목들(상장일 오름차순)."""
+    if not items:
+        return
+    from datetime import date
+    today = date.today()
+    lines = []
+    for it in items:
+        ld = it.get("listing_date")
+        broker = it.get("broker") or "-"
+        if ld:
+            delta = (ld - today).days
+            dday = "D-Day" if delta == 0 else f"D-{delta}"
+            ld_str = ld.strftime("%m/%d")
+        else:
+            dday, ld_str = "-", "-"
+        score = it.get("analysis_score")
+        score_str = f" · {score}점" if score is not None else ""
+        lines.append(f"• **{it['stock_name']}** ({broker}) — 상장 {ld_str} `{dday}`{score_str}")
+    _send({
+        "title": f"🗓️ 청약 후 상장 대기 종목 {len(items)}개",
+        "color": 0x74B9FF,
+        "description": "\n".join(lines),
+        "footer": {"text": "매도가를 입력하면 목록에서 자동 제외됩니다."},
+        "timestamp": _now_iso(),
+    })
+
+
 def send_app_started(public_url: str) -> None:
     _send({
         "title": "🚀 공모주 수익 관리 앱 시작",

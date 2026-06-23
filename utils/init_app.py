@@ -22,6 +22,7 @@ def setup() -> dict:
     _start_scheduler()
     _check_monthly_summary()
     _check_listing_today()
+    _check_pending_summary()
 
     if public_url:
         try:
@@ -144,6 +145,18 @@ def _check_listing_today() -> None:
         from utils.scheduler import _listing_day_job, _listing_dday_job
         _listing_dday_job()
         _listing_day_job()
+    except Exception:
+        pass
+
+
+def _check_pending_summary() -> None:
+    """그 주 첫 접속 시 '청약 후 상장 대기 종목' 주간 요약을 보강 실행한다.
+
+    Render 무료플랜이 월 09:00 cron 을 놓칠 수 있으므로 접속 시 한 번 더 확인.
+    ISO 주 단위 중복 방지로 cron 과 겹쳐도 두 번 발송되지 않는다."""
+    try:
+        from utils.scheduler import _pending_summary_job
+        _pending_summary_job()
     except Exception:
         pass
 
