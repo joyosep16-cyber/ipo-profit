@@ -347,9 +347,14 @@ def set_sell_tax_schedule(rows: list) -> None:
 def is_analysis_alerted(ref_key: str) -> bool:
     """공모주 분석 자동알림이 이미 발송된 종목인지 확인 (중복 발송 방지).
     ref_key 는 38커뮤니케이션 고유번호(no) 또는 종목명."""
+    return is_notified("analysis_alert", ref_key)
+
+
+def is_notified(notification_type: str, ref_key: str) -> bool:
+    """특정 type+ref_key 알림이 이미 발송됐는지 확인 (중복 발송 방지 범용 헬퍼)."""
     with Session(engine) as session:
         stmt = select(NotificationLog).where(
-            NotificationLog.type == "analysis_alert",
+            NotificationLog.type == notification_type,
             NotificationLog.ref_key == str(ref_key),
         )
         return session.execute(stmt).scalar() is not None

@@ -153,6 +153,27 @@ def send_watchlist_missed(item: dict) -> None:
     })
 
 
+def send_listing_day_alert(item: dict) -> None:
+    """청약 신청(청약완료)한 종목의 상장 당일 Discord 알림."""
+    fields = [
+        {"name": "📌 종목",   "value": item["stock_name"],                                          "inline": True},
+        {"name": "🏦 증권사", "value": item.get("broker") or "-",                                   "inline": True},
+        {"name": "🏛️ 상장일", "value": str(item["listing_date"]) if item.get("listing_date") else "-", "inline": True},
+    ]
+    if item.get("ipo_price"):
+        fields.append({"name": "💰 공모가", "value": f"₩{item['ipo_price']:,}", "inline": True})
+    if item.get("analysis_score") is not None:
+        grade = item.get("analysis_grade") or ""
+        fields.append({"name": "📊 분석점수", "value": f"{item['analysis_score']}점 {grade}".strip(), "inline": True})
+    _send({
+        "title": "🔔 오늘 상장! (청약 신청 종목)",
+        "color": 0xE17055,
+        "description": f"**{item['stock_name']}** 이(가) 오늘 상장합니다. 매도 타이밍을 확인하세요!",
+        "fields": fields,
+        "timestamp": _now_iso(),
+    })
+
+
 def send_app_started(public_url: str) -> None:
     _send({
         "title": "🚀 공모주 수익 관리 앱 시작",

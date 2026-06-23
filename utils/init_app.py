@@ -21,6 +21,7 @@ def setup() -> dict:
     public_url = _start_ngrok()
     _start_scheduler()
     _check_monthly_summary()
+    _check_listing_today()
 
     if public_url:
         try:
@@ -129,6 +130,19 @@ def _start_scheduler() -> None:
     try:
         from utils.scheduler import start_scheduler
         start_scheduler()
+    except Exception:
+        pass
+
+
+def _check_listing_today() -> None:
+    """앱 접속 시점에 '오늘 상장' 청약 종목 알림을 보강 실행한다.
+
+    Render 무료플랜은 비활성 시 잠들어 cron(08:30)이 안 돌 수 있으므로,
+    사용자가 접속해 앱이 깨어날 때 한 번 더 확인한다. NotificationLog 로
+    중복 방지되어 cron 과 겹쳐도 두 번 발송되지 않는다."""
+    try:
+        from utils.scheduler import _listing_day_job
+        _listing_day_job()
     except Exception:
         pass
 

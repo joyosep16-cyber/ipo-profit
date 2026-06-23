@@ -1,6 +1,8 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from utils.constants import WATCHLIST_STATUS_INTERESTED, WATCHLIST_STATUS_MISSED
+from utils.constants import (
+    WATCHLIST_STATUS_INTERESTED, WATCHLIST_STATUS_MISSED, WATCHLIST_STATUS_SUBSCRIBED,
+)
 
 
 def _monthly_summary_job() -> None:
@@ -52,6 +54,31 @@ def _watchlist_reminder_job() -> None:
                 send_watchlist_reminder(item)
     except Exception as e:
         print(f"[Scheduler] watchlist_reminder_job error: {e}")
+
+
+def _listing_day_job() -> None:
+    """청약 신청(청약완료)한 종목 중 오늘 상장하는 종목 Discord 알림.
+
+    매일 08:30 cron + 앱 접속 시 1회(init_app) 호출된다. NotificationLog 로
+    중복 발송을 막으므로 두 경로에서 동시 호출돼도 안전하다(Render 무료플랜은
+    잠들면 cron 이 안 도므로 접속 시 보강이 핵심).
+    """
+    try:
+        from datetime import date
+        from database import get_watchlist, is_notified, log_notification
+        from utils.discord_notifier import send_listing_day_alert
+
+        today = date.today()
+        for item in get_watchlist(status=WATCHLIST_STATUS_SUBSCRIBED):
+            if item.get("listing_date") != today:
+                continue
+            ref_key = f"{item['id']}-{item['listing_date']}"
+            if is_notified("listing_day", ref_key):
+                continue
+            send_listing_day_alert(item)
+            log_notification("listing_day", ref_key)
+    except Exception as e:
+        print(f"[Scheduler] listing_day_job error: {e}")
 
 
 def _analysis_alert_job() -> None:
@@ -107,6 +134,8 @@ def start_scheduler() -> BackgroundScheduler:
     scheduler.add_job(_monthly_summary_job,   "cron", day=1, hour=9, minute=0)
     scheduler.add_job(_watchlist_check_job,   "cron", hour=0, minute=0)
     scheduler.add_job(_watchlist_reminder_job, "cron", hour=9, minute=0)
+    # 청약 신청 종목 상장 당일 알림 — 매일 08:30 (장 시작 전)
+    scheduler.add_job(_listing_day_job, "cron", hour=8, minute=30)
     # 수요예측 분석 자동알림 — 매일 14·15·16·17시
     scheduler.add_job(_analysis_alert_job, "cron", hour="14,15,16,17", minute=0)
     scheduler.start()
