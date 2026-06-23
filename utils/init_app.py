@@ -162,19 +162,9 @@ def _check_pending_summary() -> None:
 
 
 def _check_monthly_summary() -> None:
+    """접속 시 월간 요약 보강 — 스케줄러 잡과 동일 로직(KST 기준) 재사용."""
     try:
-        from datetime import datetime
-        from database import get_monthly_stats, is_monthly_summary_sent, log_notification
-        from utils.discord_notifier import send_monthly_summary
-
-        now = datetime.now()
-        year = now.year - 1 if now.month == 1 else now.year
-        month = 12 if now.month == 1 else now.month - 1
-
-        if not is_monthly_summary_sent(year, month):
-            stats = get_monthly_stats(year, month)
-            if stats["count"] > 0:
-                send_monthly_summary(year, month, stats)
-                log_notification("monthly_summary", f"{year}-{month:02d}")
+        from utils.scheduler import _monthly_summary_job
+        _monthly_summary_job()
     except Exception:
         pass

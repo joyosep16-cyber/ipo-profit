@@ -201,8 +201,8 @@ def send_pending_holdings_summary(items: list) -> None:
     items: _pending_listing_candidates() 중 상장일이 오늘 이후인 종목들(상장일 오름차순)."""
     if not items:
         return
-    from datetime import date
-    today = date.today()
+    from datetime import timedelta
+    today = datetime.now(timezone(timedelta(hours=9))).date()  # KST 기준
     lines = []
     for it in items:
         ld = it.get("listing_date")

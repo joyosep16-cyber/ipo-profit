@@ -1,17 +1,30 @@
+from datetime import datetime, timedelta, timezone
+
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from utils.constants import (
     WATCHLIST_STATUS_INTERESTED, WATCHLIST_STATUS_MISSED, WATCHLIST_STATUS_SUBSCRIBED,
 )
 
+# 한국 표준시(고정 오프셋 +9, 서머타임 없음). 서버 OS 타임존(UTC 등)과 무관하게
+# '오늘/내일'을 KST 기준으로 계산하기 위해 사용한다. tzdata 의존 불필요.
+_KST = timezone(timedelta(hours=9))
+
+
+def _now_kst() -> datetime:
+    return datetime.now(_KST)
+
+
+def _today_kst():
+    return _now_kst().date()
+
 
 def _monthly_summary_job() -> None:
     try:
-        from datetime import datetime
         from database import get_monthly_stats, is_monthly_summary_sent, log_notification
         from utils.discord_notifier import send_monthly_summary
 
-        now = datetime.now()
+        now = _now_kst()
         year, month = (now.year - 1, 12) if now.month == 1 else (now.year, now.month - 1)
 
         if is_monthly_summary_sent(year, month):
@@ -28,11 +41,10 @@ def _monthly_summary_job() -> None:
 def _watchlist_check_job() -> None:
     """매일 00:00 — 청약 종료일 경과한 관심 종목 → 청약미신청 자동 처리"""
     try:
-        from datetime import date
         from database import get_watchlist, update_watchlist_status
         from utils.discord_notifier import send_watchlist_missed
 
-        today = date.today()
+        today = _today_kst()
         for item in get_watchlist(status=WATCHLIST_STATUS_INTERESTED):
             if item["sub_end"] and item["sub_end"] < today:
                 update_watchlist_status(item["id"], WATCHLIST_STATUS_MISSED)
@@ -44,11 +56,10 @@ def _watchlist_check_job() -> None:
 def _watchlist_reminder_job() -> None:
     """매일 09:00 — 청약 마감 D-1 Discord 알림"""
     try:
-        from datetime import date, timedelta
         from database import get_watchlist
         from utils.discord_notifier import send_watchlist_reminder
 
-        tomorrow = date.today() + timedelta(days=1)
+        tomorrow = _today_kst() + timedelta(days=1)
         for item in get_watchlist(status=WATCHLIST_STATUS_INTERESTED):
             if item["sub_end"] == tomorrow:
                 send_watchlist_reminder(item)
@@ -117,9 +128,8 @@ def _listing_day_job() -> None:
     잠들면 cron 이 안 도므로 접속 시 보강이 핵심).
     """
     try:
-        from datetime import date
         from utils.discord_notifier import send_listing_day_alert
-        _run_listing_alert(date.today(), "listing_day", send_listing_day_alert)
+        _run_listing_alert(_today_kst(), "listing_day", send_listing_day_alert)
     except Exception as e:
         print(f"[Scheduler] listing_day_job error: {e}")
 
@@ -129,9 +139,8 @@ def _listing_dday_job() -> None:
 
     매일 18:00 cron + 앱 접속 시 1회(init_app) 호출. 중복 방지는 _listing_day_job 과 동일."""
     try:
-        from datetime import date, timedelta
         from utils.discord_notifier import send_listing_dday_alert
-        _run_listing_alert(date.today() + timedelta(days=1), "listing_dday", send_listing_dday_alert)
+        _run_listing_alert(_today_kst() + timedelta(days=1), "listing_dday", send_listing_dday_alert)
     except Exception as e:
         print(f"[Scheduler] listing_dday_job error: {e}")
 
@@ -141,11 +150,10 @@ def _pending_summary_job() -> None:
 
     ISO 주(YYYY-Www) 단위로 중복 발송 방지. 상장일이 오늘 이후인 종목만 묶어 1건 발송."""
     try:
-        from datetime import date
         from database import is_notified, log_notification
         from utils.discord_notifier import send_pending_holdings_summary
 
-        today = date.today()
+        today = _today_kst()
         iso = today.isocalendar()
         ref_key = f"{iso[0]}-W{iso[1]:02d}"
         if is_notified("pending_summary", ref_key):

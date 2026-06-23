@@ -83,7 +83,9 @@ def merge_sources(scraper_data: dict, dart_data: Optional[dict]) -> dict:
     🚨 산식 분모 확인: DART inst_total_demand → build_metrics 에서 raw_verified=True 로 연산.
     """
     # DART 키 없음 → 교차검증 미수행, data_quality 미설정
-    if not config.DART_API_KEY:
+    # 런타임 평가(get_dart_api_key): 키가 import 이후 env 로 주입돼도 반영되도록
+    # import 시점 동결 상수(config.DART_API_KEY)를 쓰지 않는다.
+    if not config.get_dart_api_key():
         return dict(scraper_data)
 
     if dart_data is None:

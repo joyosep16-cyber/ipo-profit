@@ -85,25 +85,22 @@ _DART_MISMATCH = {
 
 
 def test_merge_no_dart_key(monkeypatch):
-    """DART 키 없으면 data_quality 미설정."""
-    from analyzer import config
-    monkeypatch.setattr(config, "DART_API_KEY", "")
+    """DART 키 없으면 data_quality 미설정 (env 미설정 = 런타임 키 없음)."""
+    monkeypatch.delenv("DART_API_KEY", raising=False)
     result = evaluator.merge_sources(_SCRAPER_BASE, None)
     assert "data_quality" not in result
 
 
 def test_merge_dart_none(monkeypatch):
     """DART 실패 → 38 폴백."""
-    from analyzer import config
-    monkeypatch.setattr(config, "DART_API_KEY", "dummy_key")
+    monkeypatch.setenv("DART_API_KEY", "dummy_key")
     result = evaluator.merge_sources(_SCRAPER_BASE, None)
     assert result["data_quality"] == "🔴 38 폴백(추정치)"
 
 
 def test_merge_dart_match(monkeypatch):
     """DART 수치 10% 이내 일치 → 🟢."""
-    from analyzer import config
-    monkeypatch.setattr(config, "DART_API_KEY", "dummy_key")
+    monkeypatch.setenv("DART_API_KEY", "dummy_key")
     result = evaluator.merge_sources(_SCRAPER_BASE, _DART_OK)
     assert result["data_quality"] == "🟢 일치"
     assert result["inst_total_demand"] == _DART_OK["inst_total_demand"]
@@ -112,8 +109,17 @@ def test_merge_dart_match(monkeypatch):
 
 def test_merge_dart_mismatch(monkeypatch):
     """DART 수치 10% 초과 불일치 → 🟡, DART 값 적용."""
-    from analyzer import config
-    monkeypatch.setattr(config, "DART_API_KEY", "dummy_key")
+    monkeypatch.setenv("DART_API_KEY", "dummy_key")
     result = evaluator.merge_sources(_SCRAPER_BASE, _DART_MISMATCH)
     assert result["data_quality"] == "🟡 DART 보정됨"
     assert result["inst_total_demand"] == _DART_MISMATCH["inst_total_demand"]
+
+
+def test_merge_dart_key_runtime_injection(monkeypatch):
+    """회귀 방지: import 시점 동결 상수가 아니라 런타임 env 를 봐야 한다.
+    config.DART_API_KEY(동결 빈값)와 무관하게 env 가 있으면 교차검증 수행."""
+    from analyzer import config
+    monkeypatch.setattr(config, "DART_API_KEY", "")     # import 시점 동결값(빈값) 모사
+    monkeypatch.setenv("DART_API_KEY", "late_injected")  # 런타임 주입
+    result = evaluator.merge_sources(_SCRAPER_BASE, _DART_OK)
+    assert result["data_quality"] == "🟢 일치"           # 동결 상수였다면 미설정으로 스킵됨
