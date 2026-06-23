@@ -1,22 +1,12 @@
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from utils.constants import (
     WATCHLIST_STATUS_INTERESTED, WATCHLIST_STATUS_MISSED, WATCHLIST_STATUS_SUBSCRIBED,
 )
-
-# 한국 표준시(고정 오프셋 +9, 서머타임 없음). 서버 OS 타임존(UTC 등)과 무관하게
-# '오늘/내일'을 KST 기준으로 계산하기 위해 사용한다. tzdata 의존 불필요.
-_KST = timezone(timedelta(hours=9))
-
-
-def _now_kst() -> datetime:
-    return datetime.now(_KST)
-
-
-def _today_kst():
-    return _now_kst().date()
+# '오늘/내일'은 서버 OS 타임존(UTC 등)과 무관하게 KST 기준으로 계산한다(공용 헬퍼).
+from utils.timeutil import now_kst as _now_kst, today_kst as _today_kst
 
 
 def _monthly_summary_job() -> None:

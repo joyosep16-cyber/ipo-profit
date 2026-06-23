@@ -1,10 +1,9 @@
-from datetime import date, datetime
-
 import pandas as pd
 import streamlit as st
 
 from database import delete_record, get_available_years, get_records, get_setting
 from utils.calculator import format_krw, get_return_label, get_win_rate
+from utils.timeutil import now_kst, today_kst
 from utils.discord_notifier import send_record_deleted
 from utils.excel_handler import export_to_excel
 
@@ -15,7 +14,7 @@ if msg := st.session_state.pop("success_message", None):
 
 # 연도 필터
 years = get_available_years()
-current_year = datetime.now().year
+current_year = today_kst().year
 all_years = sorted(set([current_year] + years), reverse=True)
 year_options = ["전체"] + [f"{y}년" for y in all_years]
 
@@ -31,7 +30,7 @@ filter_year = None if selected_year_str == "전체" else int(selected_year_str.r
 records = get_records(year=filter_year)
 
 # 목표 달성률 (데이터 있을 때만)
-today = date.today()
+today = today_kst()
 try:
     monthly_goal = int(get_setting("MONTHLY_GOAL") or "0")
 except ValueError:
@@ -171,7 +170,7 @@ if excel_bytes:
     st.download_button(
         "📥 엑셀 다운로드",
         data=excel_bytes,
-        file_name=f"공모주수익_{datetime.now().strftime('%Y%m%d')}.xlsx",
+        file_name=f"공모주수익_{now_kst().strftime('%Y%m%d')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 

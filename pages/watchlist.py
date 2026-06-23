@@ -1,5 +1,3 @@
-from datetime import date
-
 import streamlit as st
 
 from database import (
@@ -10,12 +8,13 @@ from database import (
 )
 from utils.constants import BROKERS, WATCHLIST_STATUS_INTERESTED, WATCHLIST_STATUS_SUBSCRIBED, WATCHLIST_STATUS_MISSED
 from utils.ipo_scraper import search_ipo_on_ipostock
+from utils.timeutil import today_kst
 
 
 def _dday(item: dict) -> str:
     if not item.get("sub_end"):
         return "-"
-    delta = (item["sub_end"] - date.today()).days
+    delta = (item["sub_end"] - today_kst()).days
     if delta > 0:
         return f"D-{delta}"
     if delta == 0:
@@ -217,7 +216,7 @@ for item in items:
                     st.session_state["prefill_from_watchlist"] = {
                         "stock_name":   item["stock_name"],
                         "sub_start":    item.get("sub_start"),
-                        "date":         item["sub_end"] or date.today(),
+                        "date":         item["sub_end"] or today_kst(),
                         "ipo_price":    item["ipo_price"] or 0,
                         "broker":       item["broker"],
                         "listing_date": item.get("listing_date"),

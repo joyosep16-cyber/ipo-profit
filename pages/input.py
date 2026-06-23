@@ -1,6 +1,3 @@
-import os
-from datetime import date
-
 import streamlit as st
 
 from database import (
@@ -11,6 +8,7 @@ from utils.calculator import (
     calc_net_profit, calc_return_rate, calc_sell_tax, get_return_label, resolve_sell_tax_rate,
 )
 from utils.config import get_env_float
+from utils.timeutil import today_kst
 from utils.constants import (
     BROKERS, SUB_TYPES, ENV_HIGH_RETURN_THRESHOLD, WATCHLIST_STATUS_SUBSCRIBED,
     ENV_SUBSCRIPTION_FEE, DEFAULT_SUBSCRIPTION_FEE,
@@ -89,7 +87,7 @@ def _manual_input(existing=None, is_edit=False, edit_id=None):
         st.session_state.setdefault("mi_memo",       existing["memo"] or "")
     elif prefill:
         st.session_state.setdefault("mi_sub_start",  prefill.get("sub_start"))
-        st.session_state.setdefault("mi_date",       prefill.get("date") or date.today())
+        st.session_state.setdefault("mi_date",       prefill.get("date") or today_kst())
         st.session_state.setdefault("mi_stock_name", prefill.get("stock_name", ""))
         _b = prefill.get("broker")
         st.session_state.setdefault("mi_broker",     _b if _b and _b in BROKERS else "기타")
@@ -98,7 +96,7 @@ def _manual_input(existing=None, is_edit=False, edit_id=None):
 
     # 신규 입력 모드 기본값 (위 두 블록에서 미처리된 키에만 적용)
     st.session_state.setdefault("mi_sub_start",  None)
-    st.session_state.setdefault("mi_date",       date.today())
+    st.session_state.setdefault("mi_date",       today_kst())
     st.session_state.setdefault("mi_stock_name", "")
     st.session_state.setdefault("mi_broker",     "기타")
     st.session_state.setdefault("mi_ipo_price",  0)

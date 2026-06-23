@@ -12,6 +12,7 @@ import streamlit as st
 from database import add_watchlist_item, get_setting
 from utils.constants import WATCHLIST_STATUS_INTERESTED
 from utils import discord_notifier
+from utils.timeutil import now_kst_naive
 from analyzer import evaluator, scraper, service
 
 st.title("🔍 공모주 분석")
@@ -177,7 +178,7 @@ def _render_score_card(bundle: dict) -> None:
                 "analysis_grade": result.get("grade"),
                 "data_quality": merged.get("data_quality"),
                 "otc_premium": metrics.get("otc_premium"),
-                "analyzed_at": datetime.now(),
+                "analyzed_at": now_kst_naive(),
             })
             st.success(f"'{name}' 을(를) 관심목록에 추가했습니다. (점수 {result.get('total')})")
 
