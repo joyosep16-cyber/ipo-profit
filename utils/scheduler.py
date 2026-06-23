@@ -112,7 +112,7 @@ def _run_listing_alert(target_date, notif_type: str, sender) -> None:
 def _listing_day_job() -> None:
     """청약 신청(청약완료)한 종목 중 오늘 상장하는 종목 Discord 알림.
 
-    매일 08:30 cron + 앱 접속 시 1회(init_app) 호출된다. NotificationLog 로
+    매일 08:00 cron + 앱 접속 시 1회(init_app) 호출된다. NotificationLog 로
     중복 발송을 막으므로 두 경로에서 동시 호출돼도 안전하다(Render 무료플랜은
     잠들면 cron 이 안 도므로 접속 시 보강이 핵심).
     """
@@ -216,8 +216,8 @@ def start_scheduler() -> BackgroundScheduler:
     scheduler.add_job(_watchlist_reminder_job, "cron", hour=9, minute=0)
     # 청약 신청 종목 상장 D-1 미리 알림 — 매일 18:00 (전날 저녁)
     scheduler.add_job(_listing_dday_job, "cron", hour=18, minute=0)
-    # 청약 신청 종목 상장 당일 알림 — 매일 08:30 (장 시작 전)
-    scheduler.add_job(_listing_day_job, "cron", hour=8, minute=30)
+    # 청약 신청 종목 상장 당일 알림 — 매일 08:00 (장 시작 전)
+    scheduler.add_job(_listing_day_job, "cron", hour=8, minute=0)
     # 청약 후 상장 대기 종목 주간 요약 — 매주 월 09:00
     scheduler.add_job(_pending_summary_job, "cron", day_of_week="mon", hour=9, minute=0)
     # 수요예측 분석 자동알림 — 매일 14·15·16·17시
