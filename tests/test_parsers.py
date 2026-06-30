@@ -46,6 +46,21 @@ def test_parse_circulating_accepts_seongmyeong_label():
     assert scraper._parse_circulating(_soup(html)) == 7_000_000
 
 
+def test_parse_circulating_spaced_label():
+    # 함정(레메디): 38이 라벨을 '성 명'·'구 분'처럼 공백을 넣어 표기 → 공백 무시 매칭 필요.
+    # 데이터행도 다열(공모전/공모후 보유/매각제한/유통가능). 합계행에서 유통가능주식수 추출.
+    html = """
+    <table>
+      <tr><td>구 분</td><td>성 명</td><td>회사와의 관계</td><td>공모전 보유주식</td><td>공모후</td><td>매각</td></tr>
+      <tr><td>관계</td><td>보유주식(A)</td><td>매각제한물량(B)</td><td>유통가능물량(A-B)</td><td>제한 기간</td></tr>
+      <tr><td>최대주주등</td><td>이레나</td><td>최대주주</td><td>2,805,440</td><td>43.91%</td>
+          <td>2,805,440</td><td>36.79%</td><td>2,805,440</td><td>36.79%</td><td>0</td><td>0.00%</td><td>3년</td></tr>
+      <tr><td>합계</td><td>6,389,791</td><td>100.00%</td><td>7,625,791</td><td>100.00%</td>
+          <td>4,496,631</td><td>58.96%</td><td>3,129,160</td><td>41.03%</td><td>-</td></tr>
+    </table>"""
+    assert scraper._parse_circulating(_soup(html)) == 3_129_160
+
+
 def test_parse_circulating_none_when_no_table():
     assert scraper._parse_circulating(_soup("<table><tr><td>무관</td></tr></table>")) is None
 

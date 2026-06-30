@@ -528,13 +528,15 @@ def _parse_circulating(soup: BeautifulSoup) -> Optional[float]:
 
     대상 테이블: "유통가능물량" + ("주주명" 또는 "성명") 포함 (주주현황 표)
       ※ 재상장·이전상장 종목은 라벨이 "성명"인 경우가 있어 둘 다 허용한다.
+      ※ 38은 라벨을 "성 명"·"구 분"처럼 공백을 넣어 정렬하는 경우가 있어(예: 레메디),
+        라벨 비교 전에 공백을 제거한다(공백 무시 매칭).
     유효 범위: 유통가능주식수 = 100,000 ~ 100,000,000 주
     """
     for table in soup.find_all("table"):
-        ttext = table.get_text(" ", strip=True)
-        if "유통가능물량" not in ttext:
+        ttext_ns = table.get_text(" ", strip=True).replace(" ", "")
+        if "유통가능물량" not in ttext_ns:
             continue
-        if "주주명" not in ttext and "성명" not in ttext:
+        if "주주명" not in ttext_ns and "성명" not in ttext_ns:
             continue
 
         # 1순위: '합계' 행에서만 탐색 (소계 오매칭 방지)
