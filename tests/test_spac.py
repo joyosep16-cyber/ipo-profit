@@ -32,6 +32,48 @@ def test_not_spac():
     assert evaluator.is_spac_or_reit("") is False
 
 
+def test_is_spac_vs_is_reit_separated():
+    # 스팩 전용 분석 대상은 스팩만 — 리츠는 분리(분석 제외 유지)
+    assert evaluator.is_spac("한국스팩16호") is True
+    assert evaluator.is_spac("NH스팩33호") is True
+    assert evaluator.is_spac("ABC SPAC Corp") is True
+    assert evaluator.is_spac("SK리츠") is False        # 리츠는 스팩 아님
+    assert evaluator.is_reit("SK리츠") is True
+    assert evaluator.is_reit("한국스팩16호") is False
+    assert evaluator.is_spac("피스피스스튜디오") is False
+
+
+# ---------------------------------------------------------------------------
+# 스팩 전용 분석 (evaluate_spac) — 경쟁률·확약 기반 판정
+# ---------------------------------------------------------------------------
+def test_evaluate_spac_strong_with_lockup():
+    # 경쟁률 ≥1,000 + 확약>0 → 적극 관심
+    r = evaluator.evaluate_spac({"inst_competition": 1200.0, "lockup_ratio": 4.0})
+    assert r["verdict"] == "적극 관심"
+    assert r["has_lockup"] is True
+    assert "우수" in r["comp_grade"]
+
+
+def test_evaluate_spac_strong_no_lockup():
+    # 경쟁률 ≥1,000 + 확약 0% → 관심(확약 0%는 스팩 전형)
+    r = evaluator.evaluate_spac({"inst_competition": 1050.0, "lockup_ratio": 0.0})
+    assert r["verdict"] == "관심"
+    assert r["has_lockup"] is False
+
+
+def test_evaluate_spac_min_band():
+    # 800~1,000 → 경계
+    assert evaluator.evaluate_spac({"inst_competition": 800.0, "lockup_ratio": 0.0})["verdict"] == "경계"
+    assert evaluator.evaluate_spac({"inst_competition": 999.0, "lockup_ratio": 3.0})["verdict"] == "경계"
+
+
+def test_evaluate_spac_below_min():
+    # <800 → 신중
+    r = evaluator.evaluate_spac({"inst_competition": 799.0, "lockup_ratio": 10.0})
+    assert r["verdict"] == "신중"
+    assert "미달" in r["comp_grade"]
+
+
 # ---------------------------------------------------------------------------
 # 스팩/리츠 점수 산정 제외
 # ---------------------------------------------------------------------------

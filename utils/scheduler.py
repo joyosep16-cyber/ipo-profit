@@ -195,7 +195,7 @@ def _analysis_alert_job() -> None:
                 continue
             try:
                 bundle = service.analyze_by_no(no)
-                if not bundle or bundle["is_spac"]:
+                if not bundle or bundle["is_spac_reit"]:
                     continue
                 total = bundle["result"].get("total")
                 if total is not None and total >= threshold:

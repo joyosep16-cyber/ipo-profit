@@ -99,14 +99,23 @@ def _parse_sub_dates(row_text: str):
         return None, None
 
 
+def _is_spac(name: str) -> bool:
+    """스팩(SPAC) 종목 판정. ('호스팩'도 '스팩' 포함)"""
+    return bool(name) and ("스팩" in name or "SPAC" in name.upper())
+
+
+def _is_reit(name: str) -> bool:
+    """리츠(REIT) 종목 판정."""
+    return bool(name) and "리츠" in name
+
+
 def _is_spac_or_reit(name: str) -> bool:
-    """스팩(SPAC)·리츠(REIT) 종목 판정. (scraper 독립 유지를 위한 로컬 헬퍼)"""
-    if not name:
-        return False
-    return ("스팩" in name or "리츠" in name or "SPAC" in name.upper())
+    """스팩 또는 리츠 판정. (scraper 독립 유지를 위한 로컬 헬퍼)"""
+    return _is_spac(name) or _is_reit(name)
 
 
-def fetch_schedule(only_upcoming: bool = True, exclude_spac_reit: bool = True) -> list[dict]:
+def fetch_schedule(only_upcoming: bool = True, exclude_spac: bool = True,
+                   exclude_reit: bool = True) -> list[dict]:
     """공모주 청약일정 목록을 파싱해 후보 종목 리스트 반환.
 
     각 항목: {"name", "no", "subscription_date"(str), "sub_start", "sub_end", "listing_date"}
@@ -116,7 +125,8 @@ def fetch_schedule(only_upcoming: bool = True, exclude_spac_reit: bool = True) -
     only_upcoming=True (기본): 이미 상장된 종목을 제외하고
       '청약 예정 + 상장 대기' 종목만 반환한다.
       판정: 청약 종료일 >= 오늘 - LISTING_GRACE_DAYS (청약일 미상이면 안전하게 포함).
-    exclude_spac_reit=True (기본): 스팩/리츠 종목을 목록에서 아예 제외한다.
+    exclude_spac/exclude_reit=True (기본): 각각 스팩·리츠를 목록에서 제외한다.
+      스팩 전용 분석을 위해 목록에 스팩을 노출하려면 exclude_spac=False 로 호출.
     """
     from datetime import date, timedelta
 
@@ -129,7 +139,7 @@ def fetch_schedule(only_upcoming: bool = True, exclude_spac_reit: bool = True) -
     cutoff = today - timedelta(days=LISTING_GRACE_DAYS)
 
     candidates: dict[str, dict] = {}  # no -> record (중복 제거)
-    spac_dropped = 0
+    dropped_excluded = 0
     for link in soup.find_all("a", href=True):
         href = link["href"]
         # 공모분석(fund) 상세 링크만 — 뉴스 링크 제외
@@ -144,9 +154,9 @@ def fetch_schedule(only_upcoming: bool = True, exclude_spac_reit: bool = True) -
         name = _clean_schedule_name(raw_name)
         if not name:
             continue
-        # 스팩/리츠 완전 제외
-        if exclude_spac_reit and _is_spac_or_reit(name):
-            spac_dropped += 1
+        # 스팩/리츠 제외 (각각 토글 — 스팩 분석용으로 스팩만 노출 가능)
+        if (exclude_spac and _is_spac(name)) or (exclude_reit and _is_reit(name)):
+            dropped_excluded += 1
             continue
         no = m.group(1)
         if no in candidates:
@@ -169,7 +179,7 @@ def fetch_schedule(only_upcoming: bool = True, exclude_spac_reit: bool = True) -
     result = list(candidates.values())
     total = len(result)
 
-    spac_note = f", 스팩/리츠 {spac_dropped}종목 제외" if exclude_spac_reit and spac_dropped else ""
+    spac_note = f", 스팩/리츠 {dropped_excluded}종목 제외" if dropped_excluded else ""
 
     if only_upcoming:
         kept = []

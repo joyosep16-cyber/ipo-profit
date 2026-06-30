@@ -195,6 +195,29 @@ def send_listing_dday_alert(item: dict) -> None:
     })
 
 
+def send_spac_analysis(detail: dict, spac: dict, metrics: dict) -> None:
+    """스팩(SPAC) 전용 분석 카드 — 기관경쟁률·의무보유확약 기반 판정 Discord 발송."""
+    name = detail.get("name", "-")
+    warn = "" if metrics.get("raw_verified") else " ⚠️(추정치)"
+    price = detail.get("confirmed_price")
+    fields = [
+        {"name": "확정 공모가", "value": f"{int(price):,}원" if price else "-", "inline": True},
+        {"name": "기관 경쟁률", "value": f"{metrics['inst_competition']:,.2f} : 1{warn}", "inline": True},
+        {"name": "의무보유확약", "value": f"{metrics['lockup_ratio']:.2f}%{warn}", "inline": True},
+        {"name": "경쟁률 판정", "value": spac.get("comp_grade", "-"), "inline": True},
+        {"name": "확약", "value": "➕ 확보(>0%)" if spac.get("has_lockup") else "⚪ 0%", "inline": True},
+        {"name": "상장 예정일", "value": str(detail.get("listing_date") or "-"), "inline": True},
+    ]
+    _send({
+        "title": f"🟦 [스팩 분석] {name}",
+        "description": f"{spac.get('emoji', '')} **{spac.get('verdict', '')}**\n📌 {spac.get('action', '')}",
+        "color": spac.get("color", 0x3498DB),
+        "fields": fields,
+        "footer": {"text": "스팩: 경쟁률·확약만으로 판정 (공모가 2,000원 · 유통물량↓ → 2,000원 상회 기대)"},
+        "timestamp": _now_iso(),
+    })
+
+
 def send_pending_holdings_summary(items: list) -> None:
     """청약 후 상장 대기 중(미상장)인 보유 종목 주간 요약 Discord 알림.
 

@@ -48,16 +48,63 @@ def otc_premium(otc_price: Optional[float], confirmed_price: float) -> float:
     return (otc_price - confirmed_price) / confirmed_price * 100.0
 
 
-def is_spac_or_reit(name: str) -> bool:
-    """종목명이 스팩(SPAC) 또는 리츠(REIT)인지 판정.
-
-    스팩·리츠는 일반 공모주와 성격이 달라(장외 거래 없음, 점수 산정 부적합)
-    별도 예외 처리 대상이다. 영문 'SPAC'은 대소문자 무시.
-    """
+def is_spac(name: str) -> bool:
+    """종목명이 스팩(SPAC)인지 판정. ('호스팩'도 '스팩' 포함이라 매칭, 'SPAC' 대소문자 무시)"""
     if not name:
         return False
-    upper = name.upper()
-    return any(kw in name for kw in ("스팩", "호스팩", "리츠")) or "SPAC" in upper
+    return "스팩" in name or "SPAC" in name.upper()
+
+
+def is_reit(name: str) -> bool:
+    """종목명이 리츠(REIT)인지 판정."""
+    return bool(name) and "리츠" in name
+
+
+def is_spac_or_reit(name: str) -> bool:
+    """스팩 또는 리츠 — 일반 공모주 점수 산정 부적합(장외 거래 없음) 대상."""
+    return is_spac(name) or is_reit(name)
+
+
+def evaluate_spac(metrics: dict) -> dict:
+    """스팩 전용 분석 — 수요예측 발표 후 기관경쟁률·의무보유확약만으로 판정.
+
+    유통가능규모·장외는 무시한다(스팩은 장외 없음, 공모가 보통 2,000원).
+      - 경쟁률 ≥1,000:1 우수 / 800~1,000 최소충족 / <800 미달
+      - 확약 0% 초과면 긍정(상장일 유통물량↓ → 2,000원 상회 확률↑)
+    반환: comp/lockup/has_lockup/comp_grade/verdict/emoji/color/action.
+    """
+    comp = metrics.get("inst_competition") or 0.0
+    lockup = metrics.get("lockup_ratio") or 0.0
+    has_lockup = lockup > 0.0
+
+    if comp >= config.SPAC_COMP_STRONG:
+        comp_grade = "🟢 우수 (안전 기준)"
+        if has_lockup:
+            verdict, emoji, color = "적극 관심", "🟢🔥", 0x00FF00
+            action = "경쟁률 우수 + 확약 확보 → 상장 당일 2,000원 상회 기대"
+        else:
+            verdict, emoji, color = "관심", "🟡", 0xFFCC00
+            action = "경쟁률 우수하나 확약 0%(스팩 전형) → 관심"
+    elif comp >= config.SPAC_COMP_MIN:
+        comp_grade = "🟡 최소 기준 충족"
+        verdict, emoji, color = "경계", "🟡", 0xFFCC00
+        action = "경쟁률 최소 기준 충족" + (" + 확약 가점" if has_lockup else " (확약 0%)")
+    else:
+        comp_grade = "🔴 미달"
+        verdict, emoji, color = "신중", "🔴", 0xFF0000
+        action = "경쟁률 미달(800:1 미만) → 신중"
+
+    return {
+        "is_spac": True,
+        "inst_competition": comp,
+        "lockup_ratio": lockup,
+        "has_lockup": has_lockup,
+        "comp_grade": comp_grade,
+        "verdict": verdict,
+        "emoji": emoji,
+        "color": color,
+        "action": action,
+    }
 
 
 def calc_deposit(confirmed_price: float, min_qty: int, deposit_rate: float = 0.5) -> int:

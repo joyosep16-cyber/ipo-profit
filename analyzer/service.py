@@ -28,12 +28,14 @@ def analyze_by_no(no: str, is_simultaneous: bool = False) -> Optional[dict]:
         return None
 
     name = detail["name"]
-    is_spac = evaluator.is_spac_or_reit(name)
+    is_spac = evaluator.is_spac(name)
+    is_reit = evaluator.is_reit(name)
+    is_spac_reit = is_spac or is_reit
 
     dart_data = dart.fetch_raw_demand(name)
     merged = evaluator.merge_sources(detail, dart_data)
 
-    if is_spac:
+    if is_spac_reit:
         otc_price = None
     else:
         otc_price = scraper.get_otc_price(
@@ -44,17 +46,21 @@ def analyze_by_no(no: str, is_simultaneous: bool = False) -> Optional[dict]:
             buy_prices=merged.get("buy_prices"),
         )
 
-    metrics = evaluator.build_metrics(merged, otc_price, skip_otc=is_spac)
+    metrics = evaluator.build_metrics(merged, otc_price, skip_otc=is_spac_reit)
     result = evaluator.evaluate_ipo_score(metrics, is_simultaneous=is_simultaneous,
-                                          is_spac_reit=is_spac)
+                                          is_spac_reit=is_spac_reit)
+    # 스팩은 경쟁률·확약만으로 별도 판정(리츠는 분석 제외 — spac_result=None)
+    spac_result = evaluator.evaluate_spac(metrics) if is_spac else None
 
     return {"merged": merged, "metrics": metrics, "result": result,
-            "is_spac": is_spac, "name": name, "no": no}
+            "is_spac_reit": is_spac_reit, "is_spac": is_spac, "is_reit": is_reit,
+            "spac_result": spac_result, "name": name, "no": no}
 
 
 def find_no_by_name(target_name: str) -> Optional[str]:
-    """청약일정 목록에서 종목명 매칭 → 고유번호(no) 반환. 없으면 None."""
-    for c in scraper.fetch_schedule():
+    """청약일정 목록에서 종목명 매칭 → 고유번호(no) 반환. 없으면 None.
+    스팩도 검색 가능하도록 스팩은 목록에 포함(리츠만 제외)."""
+    for c in scraper.fetch_schedule(exclude_spac=False):
         if is_same_company(target_name, c["name"]):
             return c["no"]
     return None

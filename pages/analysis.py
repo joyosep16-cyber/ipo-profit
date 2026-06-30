@@ -28,7 +28,8 @@ if _dart_key:
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def _cached_schedule() -> list[dict]:
-    return scraper.fetch_schedule()
+    # 스팩은 전용 분석을 위해 목록에 노출(리츠만 제외)
+    return scraper.fetch_schedule(exclude_spac=False)
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -46,6 +47,47 @@ def _parse_date(s):
         return None
 
 
+def _render_spac_card(bundle: dict) -> None:
+    """스팩(SPAC) 전용 분석 카드 — 기관경쟁률·의무보유확약만으로 판정."""
+    merged = bundle["merged"]
+    metrics = bundle["metrics"]
+    name = bundle["name"]
+    spac = bundle["spac_result"]
+    raw_warn = "" if metrics.get("raw_verified") else " ⚠️추정"
+
+    st.subheader(f"🟦 {name} · 스팩(SPAC) 분석")
+    price = merged.get("confirmed_price")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("확정 공모가", f"{int(price):,}원" if price else "-")
+    c2.metric("상장 예정일", str(merged.get("listing_date") or "-"))
+    c3.metric("데이터 신뢰도", merged.get("data_quality") or ("추정" if raw_warn else "-"))
+
+    st.divider()
+    m1, m2 = st.columns(2)
+    m1.metric("기관 경쟁률", f"{metrics['inst_competition']:,.2f} : 1{raw_warn}")
+    m2.metric("의무보유확약", f"{metrics['lockup_ratio']:.2f}%{raw_warn}")
+    st.caption(f"경쟁률 판정: {spac['comp_grade']}　·　확약: "
+               + ("➕ 확보(>0%)" if spac["has_lockup"] else "⚪ 0% (스팩 전형)"))
+
+    st.divider()
+    verdict_line = f"{spac['emoji']} **{spac['verdict']}**\n\n💡 {spac['action']}"
+    if spac["verdict"] == "적극 관심":
+        st.success(verdict_line)
+    elif spac["verdict"] == "신중":
+        st.error(verdict_line)
+    else:
+        st.warning(verdict_line)
+    st.caption("스팩은 경쟁률·의무보유확약만으로 판정합니다(유통규모·장외 제외, 공모가 보통 2,000원). "
+               "상장 당일 확약 물량만큼 유통이 줄어 2,000원 상회 가능성이 높아집니다.")
+
+    if st.button("💬 Discord 발송", key=f"disc_spac_{bundle['no']}", use_container_width=True):
+        if not (os.getenv("DISCORD_WEBHOOK_URL") or get_setting("DISCORD_WEBHOOK_URL")):
+            st.error("Discord 웹훅이 설정되지 않았습니다. 설정 페이지에서 등록하세요.")
+        else:
+            discord_notifier.send_spac_analysis(merged, spac, metrics)
+            st.success("Discord로 발송했습니다.")
+
+
 def _render_score_card(bundle: dict) -> None:
     merged = bundle["merged"]
     metrics = bundle["metrics"]
@@ -53,10 +95,12 @@ def _render_score_card(bundle: dict) -> None:
     name = bundle["name"]
     result = bundle["result"]   # 기본 결과(동시상장 미적용). 아래에서 토글로 재계산.
 
-    # 스팩/리츠는 분석 대상에서 아예 제외 — 안내만 표시
+    # 리츠: 분석 제외 안내만 / 스팩: 경쟁률·확약 전용 분석 카드
+    if bundle.get("is_reit"):
+        st.info(f"ℹ️ **{name}** 은(는) 리츠(REIT) 종목으로 공모주 점수 분석 대상에서 제외됩니다.")
+        return
     if is_spac:
-        st.info(f"ℹ️ **{name}** 은(는) 스팩(SPAC)/리츠(REIT) 종목으로 "
-                f"공모주 점수 분석 대상에서 제외됩니다.")
+        _render_spac_card(bundle)
         return
 
     raw_warn = "" if metrics.get("raw_verified") else " ⚠️추정"
