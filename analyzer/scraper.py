@@ -10,12 +10,29 @@ HTML 구조 의존을 한곳에 모으기 위해 라벨 기반 조회 헬퍼(_fi
 """
 import re
 import statistics
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from bs4 import BeautifulSoup
 
 from analyzer import config
 from analyzer.net import logger, parse_number, safe_get
+
+
+def _today_kst() -> date:
+    """KST(고정 오프셋 +9) 기준 오늘. 서버 OS 타임존(클라우드 UTC)과 무관."""
+    return (datetime.now(timezone.utc) + timedelta(hours=9)).date()
+
+
+def _is_listed(listing_date_str: Optional[str], today: date) -> bool:
+    """상장일(YYYY-MM-DD 문자열)이 today 이전이면 '이미 상장'. None/파싱실패 → False."""
+    if not listing_date_str:
+        return False
+    try:
+        ld = datetime.strptime(str(listing_date_str)[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return False
+    return ld < today
 
 
 # ===========================================================================
@@ -114,8 +131,31 @@ def _is_spac_or_reit(name: str) -> bool:
     return _is_spac(name) or _is_reit(name)
 
 
+def _drop_already_listed(candidates: list[dict], today: date) -> list[dict]:
+    """이미 상장한 종목 제거. 비용 절감을 위해 '청약이 끝난(또는 미상)' 후보만
+    상세를 조회해 상장일을 확인한다(청약 예정/진행 종목은 상장 전이 확실 → 조회 생략).
+    상장일이 확인되면 후보 dict 의 listing_date 를 채워둔다."""
+    kept, dropped = [], 0
+    for c in candidates:
+        se = c.get("sub_end")
+        if se is not None and se >= today:
+            kept.append(c)          # 청약 예정/진행 → 상장 전 확정
+            continue
+        detail = fetch_detail(c["no"])
+        ld = detail.get("listing_date") if detail else None
+        if _is_listed(ld, today):
+            dropped += 1
+            continue
+        if ld:
+            c["listing_date"] = ld
+        kept.append(c)
+    if dropped:
+        logger.info("이미 상장 종목 %d개 제거(상장일 기준)", dropped)
+    return kept
+
+
 def fetch_schedule(only_upcoming: bool = True, exclude_spac: bool = True,
-                   exclude_reit: bool = True) -> list[dict]:
+                   exclude_reit: bool = True, drop_listed: bool = False) -> list[dict]:
     """공모주 청약일정 목록을 파싱해 후보 종목 리스트 반환.
 
     각 항목: {"name", "no", "subscription_date"(str), "sub_start", "sub_end", "listing_date"}
@@ -127,15 +167,16 @@ def fetch_schedule(only_upcoming: bool = True, exclude_spac: bool = True,
       판정: 청약 종료일 >= 오늘 - LISTING_GRACE_DAYS (청약일 미상이면 안전하게 포함).
     exclude_spac/exclude_reit=True (기본): 각각 스팩·리츠를 목록에서 제외한다.
       스팩 전용 분석을 위해 목록에 스팩을 노출하려면 exclude_spac=False 로 호출.
+    drop_listed=True: 청약이 끝난 후보의 상세를 조회해 '상장일이 지난'(이미 상장)
+      종목을 제거한다. 청약일정 페이지에 상장일이 없어 청약종료일 추정만으로는
+      걸러지지 않는 '이미 상장' 종목까지 정확히 제외한다(상세 조회 비용 발생).
     """
-    from datetime import date, timedelta
-
     soup = _soup(config.SCHEDULE_LIST_URL)
     if soup is None:
         logger.error("청약일정 목록 로드 실패")
         return []
 
-    today = date.today()
+    today = _today_kst()
     cutoff = today - timedelta(days=LISTING_GRACE_DAYS)
 
     candidates: dict[str, dict] = {}  # no -> record (중복 제거)
@@ -193,9 +234,13 @@ def fetch_schedule(only_upcoming: bool = True, exclude_spac: bool = True,
                 dropped += 1
         logger.info("청약일정 후보 %d종목 (미상장 %d, 이미 상장 추정 %d 제외%s)",
                     total, len(kept), dropped, spac_note)
-        return kept
+        result = kept
+    else:
+        logger.info("청약일정에서 후보 %d종목 발견%s", total, spac_note)
 
-    logger.info("청약일정에서 후보 %d종목 발견%s", total, spac_note)
+    # 상장일 기준 '이미 상장' 정밀 제거 (청약 끝난 후보만 상세 조회)
+    if drop_listed:
+        result = _drop_already_listed(result, today)
     return result
 
 

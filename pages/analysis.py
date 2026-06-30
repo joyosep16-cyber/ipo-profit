@@ -28,8 +28,8 @@ if _dart_key:
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def _cached_schedule() -> list[dict]:
-    # 스팩은 전용 분석을 위해 목록에 노출(리츠만 제외)
-    return scraper.fetch_schedule(exclude_spac=False)
+    # 스팩은 전용 분석을 위해 목록에 노출(리츠만 제외) + 이미 상장한 종목 제거
+    return scraper.fetch_schedule(exclude_spac=False, drop_listed=True)
 
 
 @st.cache_data(ttl=1800, show_spinner=False)

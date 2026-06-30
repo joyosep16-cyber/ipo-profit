@@ -133,6 +133,16 @@ def test_parse_band_high_low():
     assert scraper._parse_band("없음") == (None, None)
 
 
+def test_is_listed():
+    from datetime import date
+    today = date(2026, 7, 1)
+    assert scraper._is_listed("2026-06-30", today) is True    # 어제 상장 → 이미 상장
+    assert scraper._is_listed("2026-07-01", today) is False   # 오늘 상장 → '이미'는 아님
+    assert scraper._is_listed("2026-07-13", today) is False   # 미래 상장
+    assert scraper._is_listed(None, today) is False           # 상장일 미상 → 보수적 유지
+    assert scraper._is_listed("미정", today) is False          # 파싱 실패 → 유지
+
+
 # ===========================================================================
 # 장외 호가 — get_otc_price / _reject_otc_outliers / _extract_price_from_row
 # ===========================================================================
