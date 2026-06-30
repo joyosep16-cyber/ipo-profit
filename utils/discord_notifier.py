@@ -289,12 +289,14 @@ def _fmt_deposit_map(deposit_map: dict) -> str:
     return "\n".join(lines)
 
 
-def send_analysis_score(detail: dict, result: dict, metrics: dict) -> None:
+def send_analysis_score(detail: dict, result: dict, metrics: dict,
+                        result_min: dict = None) -> None:
     """공모주 수요예측 분석 점수 카드를 Discord 로 발송.
 
     detail: scraper.fetch_detail + merge_sources 결과
-    result: evaluator.evaluate_ipo_score 결과
-    metrics: evaluator.build_metrics 결과
+    result: evaluator.evaluate_ipo_score 결과 (장외 평균 기준)
+    metrics: evaluator.build_metrics 결과 (otc_min_premium 포함)
+    result_min: 장외 최소호가 기준 결과 (있으면 평균/최소 총점·괴리율을 함께 표기)
     """
     name = detail.get("name", "-")
     total = result.get("total")
@@ -335,9 +337,18 @@ def send_analysis_score(detail: dict, result: dict, metrics: dict) -> None:
         desc = (f"{result.get('emoji','')} **{result.get('verdict','')}** — {result.get('grade','')}\n"
                 f"📌 {result.get('action','')}\n💰 {result.get('expected_return','')}")
         fields.append({"name": "유통가능규모", "value": f"약 {metrics['circulating_eok']:,.1f}억원", "inline": True})
-        otc_str = "없음 (장외 -2)" if metrics.get("otc_missing") else _fmt_premium(metrics["otc_premium"])
+        if metrics.get("otc_missing"):
+            otc_str = "없음 (장외 -2)"
+        else:
+            avg_p = _fmt_premium(metrics["otc_premium"])
+            min_p = metrics.get("otc_min_premium")
+            otc_str = f"평균 {avg_p}" + (f" · 최소 {_fmt_premium(min_p)}" if min_p is not None else "")
         fields.append({"name": "장외 괴리율", "value": otc_str, "inline": True})
-        footer = f"가이드라인 총점: {total}점 | {result.get('expected_return','')}"
+        if result_min is not None and result_min.get("total") is not None:
+            footer = (f"가이드라인 총점: {total}점(장외 평균) · {result_min['total']}점(장외 최소) "
+                      f"| {result.get('expected_return','')}")
+        else:
+            footer = f"가이드라인 총점: {total}점 | {result.get('expected_return','')}"
 
     fields.append({"name": "상장 예정일", "value": str(detail.get("listing_date") or "-"), "inline": True})
     fields.append({"name": "🏢 주관사별 최소 증거금",

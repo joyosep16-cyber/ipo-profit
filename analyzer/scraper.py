@@ -661,6 +661,67 @@ def _reject_otc_outliers(prices: list, tol: float = config.OTC_OUTLIER_TOL) -> l
     return kept or valid
 
 
+def _otc_chosen_prices(name, confirmed_price, sells, buys) -> Optional[list]:
+    """팝니다·삽니다 → (양쪽 필수) 이상치 제거 후 각 상위 5개를 합친 호가 리스트.
+
+    장외 '있음'은 매도·매수가 모두 있어야 인정. 한쪽이라도 없으면 None.
+    이상치(중앙값 ±OTC_OUTLIER_TOL 밖)를 먼저 제거한 뒤 각 상위 5개를 뽑는다.
+    """
+    sells = list(sells or [])
+    buys = list(buys or [])
+
+    # 상세 페이지에 팝니다·삽니다가 모두 없을 때만 OTC URL 재시도
+    if not sells and not buys:
+        url = config.OTC_URL.format(name=name)
+        soup = _soup(url)
+        if soup is not None:
+            page_text = soup.get_text(" ", strip=True)
+            if not any(kw in page_text for kw in _NO_PRICE_TEXTS):
+                sells, buys = _parse_otc_from_detail(soup, confirmed_price)
+
+    if not sells or not buys:
+        logger.info("장외 없음(매도 %d건·매수 %d건 — 양쪽 모두 필요): %s",
+                    len(sells), len(buys), name)
+        return None
+
+    # 이상치를 먼저 제외(상위 5개를 자른 뒤 거르면 이상치가 슬롯 차지)
+    low, high = _otc_band(sells + buys)
+    if low is not None:
+        sells = [p for p in sells if low <= p <= high]
+        buys = [p for p in buys if low <= p <= high]
+    if not sells or not buys:
+        logger.info("장외 없음(이상치 제외 후 매도 %d·매수 %d): %s", len(sells), len(buys), name)
+        return None
+
+    return sells[:_OTC_TOP_N] + buys[:_OTC_TOP_N]
+
+
+def get_otc_quote(
+    name: str,
+    confirmed_price: Optional[float] = None,
+    sell_prices: Optional[list] = None,
+    buy_prices: Optional[list] = None,
+) -> dict:
+    """장외 시세 평균·최소를 함께 반환: {"avg": float|None, "min": float|None}.
+
+    분석가는 장외 '최소호가' 기준으로 괴리율을 보는 경우가 있어 평균과 최소를 모두 제공한다.
+    둘 다 같은 호가 집합(이상치 제거 후 매도/매수 각 상위 5개)에서 산출한다.
+    장외 없음이면 {"avg": None, "min": None}.
+    """
+    try:
+        chosen = _otc_chosen_prices(name, confirmed_price, sell_prices, buy_prices)
+        if not chosen:
+            return {"avg": None, "min": None}
+        avg = sum(chosen) / len(chosen)
+        mn = float(min(chosen))
+        logger.info("장외(%s): 평균 %s원 · 최소 %s원 (호가 %d개)",
+                    name, f"{round(avg):,}", f"{round(mn):,}", len(chosen))
+        return {"avg": avg, "min": mn}
+    except Exception as exc:
+        logger.warning("장외 가격 파싱 예외(%s): %s → 장외 없음 처리", name, exc)
+        return {"avg": None, "min": None}
+
+
 def get_otc_price(
     name: str,
     face_value: Optional[float] = None,  # 호환 유지 (미사용)
@@ -668,68 +729,9 @@ def get_otc_price(
     sell_prices: Optional[list] = None,
     buy_prices: Optional[list] = None,
 ) -> Optional[float]:
-    """장외 시세가 산출. 없으면 None(=장외 시세 없음).
-
-    장외 '있음' 판정 기준은 **팝니다(매도호가)와 삽니다(매수호가)가 모두 존재**하는
-    것이다. 한쪽만 있으면 실거래 시세로 보기 어려워 '없음'으로 처리한다.
-      (예: 져스텍 — 삽니다만 5건, 팝니다 0건 → 장외 없음)
-
-    양쪽이 모두 있으면 매도·매수 호가를 합쳐 이상치 제거 후 평균.
-    이상치 제거: 중앙값 대비 ±OTC_OUTLIER_TOL 밴드 밖 호가는 버린다.
-
-    반환:
-      float  — 장외 시세 있음(평균가)
-      None   — 장외 시세 없음(매도/매수호가 중 하나라도 없음 / 데이터 미확보 / 예외)
-               → 점수 -2 대상
-    """
-    try:
-        sells = list(sell_prices or [])
-        buys = list(buy_prices or [])
-
-        # 상세 페이지에 팝니다·삽니다가 모두 없을 때만 OTC URL 재시도
-        if not sells and not buys:
-            url = config.OTC_URL.format(name=name)
-            soup = _soup(url)
-            if soup is not None:
-                page_text = soup.get_text(" ", strip=True)
-                if not any(kw in page_text for kw in _NO_PRICE_TEXTS):
-                    sells, buys = _parse_otc_from_detail(soup, confirmed_price)
-
-        # 매도호가·매수호가 둘 중 하나라도 없으면 장외 시세 없음으로 판정
-        if not sells or not buys:
-            logger.info("장외 없음(매도 %d건·매수 %d건 — 양쪽 모두 필요): %s",
-                        len(sells), len(buys), name)
-            return None
-
-        raw_n = len(sells) + len(buys)
-
-        # ── 1단계: 터무니없는 호가(이상치)를 먼저 제외 ──────────────────────
-        # 중앙값 밴드를 매도+매수 전체 분포에서 산출한 뒤, 각 호가를 거른다.
-        # (상위 5개를 '자른 뒤' 거르는 게 아니라, 거른 뒤 상위 5개를 뽑는다)
-        low, high = _otc_band(sells + buys)
-        if low is not None:
-            sells = [p for p in sells if low <= p <= high]
-            buys = [p for p in buys if low <= p <= high]
-
-        # 이상치 제거 후에도 양쪽이 모두 남아야 장외 시세로 인정
-        if not sells or not buys:
-            logger.info("장외 없음(이상치 제외 후 매도 %d·매수 %d): %s",
-                        len(sells), len(buys), name)
-            return None
-
-        # ── 2단계: 정상 호가 중 상위 5개씩(게시판 상단=최신) → 통합 평균 ──────
-        chosen = sells[:_OTC_TOP_N] + buys[:_OTC_TOP_N]
-        otc = sum(chosen) / len(chosen)
-
-        logger.info(
-            "장외 평균(%s): %s원 (수집 %d건 → 이상치 제외 후 매도 %d·매수 %d 중 상위 %d개 사용)",
-            name, f"{round(otc):,}", raw_n, len(sells), len(buys), len(chosen),
-        )
-        return otc
-
-    except Exception as exc:
-        logger.warning("장외 가격 파싱 예외(%s): %s → 장외 없음 처리", name, exc)
-        return None
+    """장외 평균가만 반환(하위 호환 래퍼). 평균·최소가 모두 필요하면 get_otc_quote 사용."""
+    return get_otc_quote(name, confirmed_price=confirmed_price,
+                         sell_prices=sell_prices, buy_prices=buy_prices)["avg"]
 
 
 def _extract_price_from_row(row) -> Optional[float]:

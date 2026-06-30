@@ -165,6 +165,19 @@ def test_get_otc_price_rejects_outliers_then_average():
     assert otc == 55500.0
 
 
+def test_get_otc_quote_avg_and_min():
+    # 평균·최소 동시 산출 (레메디 호가: 팝니다 46000×4·43000, 삽니다 41000×5)
+    q = scraper.get_otc_quote("X", confirmed_price=20700,
+                              sell_prices=[46000, 46000, 46000, 46000, 43000],
+                              buy_prices=[41000, 41000, 41000, 41000, 41000])
+    assert q["min"] == 41000.0
+    assert round(q["avg"]) == 43200          # (46000*4+43000+41000*5)/10
+
+
+def test_get_otc_quote_one_side_none():
+    assert scraper.get_otc_quote("X", sell_prices=[], buy_prices=[41000, 42000]) == {"avg": None, "min": None}
+
+
 def test_extract_price_from_row_picks_price_not_small_number():
     row = _soup("<table><tr><td>1</td><td>55,000</td><td>수량 10</td></tr></table>").find("tr")
     assert scraper._extract_price_from_row(row) == 55_000

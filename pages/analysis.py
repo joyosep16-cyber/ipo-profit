@@ -137,10 +137,18 @@ def _render_score_card(bundle: dict) -> None:
         else:
             m3.metric("유통가능규모", f"{metrics['circulating_eok']:,.1f}억원")
         prem = metrics["otc_premium"]
+        prem_min = metrics.get("otc_min_premium")
         if metrics.get("otc_missing"):
             m4.metric("장외 괴리율", "없음", help="매도호가·매수호가가 모두 있어야 시세로 인정 (없으면 -2점)")
         else:
-            m4.metric("장외 괴리율", f"{prem:+.2f}%" if prem is not None else "N/A")
+            m4.metric("장외 괴리율(평균)", f"{prem:+.2f}%" if prem is not None else "N/A")
+
+    # 장외 괴리율 — 평균/최소 함께 표기 (분석가는 최소호가 기준을 보기도 함)
+    if not is_spac and not metrics.get("otc_missing") and prem is not None:
+        ap, mp = metrics.get("otc_avg_price"), metrics.get("otc_min_price")
+        min_str = f"최소 **{prem_min:+.2f}%**" + (f" ({mp:,.0f}원)" if mp else "") if prem_min is not None else "최소 N/A"
+        avg_extra = f" ({ap:,.0f}원)" if ap else ""
+        st.caption(f"장외 괴리율 — 평균 **{prem:+.2f}%**{avg_extra}　·　{min_str}")
 
     # 데이터 신뢰도
     if merged.get("data_quality"):
@@ -199,6 +207,10 @@ def _render_score_card(bundle: dict) -> None:
         # 캐시된 bundle 을 변형하지 않도록 지역 변수에만 재계산 결과 보관
         result = evaluator.evaluate_ipo_score(
             score_metrics, is_simultaneous=is_simul, is_spac_reit=is_spac)
+        # 장외 최소호가 기준 총점(분석가 방식) — 장외 칸만 최소 괴리율로 교체
+        score_metrics_min = {**score_metrics, "otc_premium": metrics.get("otc_min_premium")}
+        result_min = evaluator.evaluate_ipo_score(
+            score_metrics_min, is_simultaneous=is_simul, is_spac_reit=is_spac)
 
     # 점수 / 추천
     if is_spac:
@@ -208,11 +220,15 @@ def _render_score_card(bundle: dict) -> None:
         grade = result["grade"]
         verdict = result["verdict"]
         if total >= 16:
-            st.success(f"🎯 총점 **{total}점** · {grade} · **{verdict}**\n\n💡 {result['action']}")
+            st.success(f"🎯 총점 **{total}점**(장외 평균) · {grade} · **{verdict}**\n\n💡 {result['action']}")
         elif total >= 10:
-            st.warning(f"🎯 총점 **{total}점** · {grade} · {verdict}\n\n💡 {result['action']}")
+            st.warning(f"🎯 총점 **{total}점**(장외 평균) · {grade} · {verdict}\n\n💡 {result['action']}")
         else:
-            st.error(f"🎯 총점 **{total}점** · {grade} · {verdict}\n\n💡 {result['action']}")
+            st.error(f"🎯 총점 **{total}점**(장외 평균) · {grade} · {verdict}\n\n💡 {result['action']}")
+        # 장외 최소호가 기준 총점도 함께 표시
+        total_min = result_min["total"]
+        st.caption(f"📉 장외 **최소호가** 기준 총점: **{total_min}점** · {result_min['grade']} "
+                   f"({result_min['verdict']})" + ("　— 자동알림 기준" if total_min >= 16 else ""))
 
     # 액션 버튼
     b1, b2 = st.columns(2)
@@ -222,7 +238,7 @@ def _render_score_card(bundle: dict) -> None:
                 st.error("Discord 웹훅이 설정되지 않았습니다. 설정 페이지에서 등록하세요.")
             else:
                 # score_metrics: 수동 보정(유통가능규모)이 반영된 지표 — 화면 점수와 일치시킴
-                discord_notifier.send_analysis_score(merged, result, score_metrics)
+                discord_notifier.send_analysis_score(merged, result, score_metrics, result_min)
                 st.success("Discord로 발송했습니다.")
     with b2:
         if st.button("⭐ 관심목록에 추가", key=f"wl_{bundle['no']}", use_container_width=True):

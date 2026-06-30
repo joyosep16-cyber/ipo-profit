@@ -207,10 +207,12 @@ def _analysis_alert_job() -> None:
                         send_spac_analysis(bundle["merged"], spac, bundle["metrics"])
                         log_notification("analysis_alert", no)
                     continue
-                # 일반 공모주: 임계점 이상이면 발송
-                total = bundle["result"].get("total")
-                if total is not None and total >= threshold:
-                    send_analysis_score(bundle["merged"], bundle["result"], bundle["metrics"])
+                # 일반 공모주: 장외 '최소호가' 기준 총점이 임계점 이상이면 발송(분석가 방식)
+                result_min = bundle.get("result_min") or bundle["result"]
+                total_min = result_min.get("total")
+                if total_min is not None and total_min >= threshold:
+                    send_analysis_score(bundle["merged"], bundle["result"],
+                                        bundle["metrics"], result_min)
                     log_notification("analysis_alert", no)
             except Exception as inner:
                 print(f"[Scheduler] analysis_alert 종목 처리 오류({name}): {inner}")

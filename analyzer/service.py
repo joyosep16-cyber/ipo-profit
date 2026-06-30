@@ -35,24 +35,33 @@ def analyze_by_no(no: str, is_simultaneous: bool = False) -> Optional[dict]:
     dart_data = dart.fetch_raw_demand(name)
     merged = evaluator.merge_sources(detail, dart_data)
 
+    cp = merged.get("confirmed_price")
     if is_spac_reit:
-        otc_price = None
+        otc_avg = otc_min = None
     else:
-        otc_price = scraper.get_otc_price(
-            name,
-            face_value=merged.get("face_value"),
-            confirmed_price=merged.get("confirmed_price"),
-            sell_prices=merged.get("sell_prices"),
-            buy_prices=merged.get("buy_prices"),
-        )
+        quote = scraper.get_otc_quote(
+            name, confirmed_price=cp,
+            sell_prices=merged.get("sell_prices"), buy_prices=merged.get("buy_prices"))
+        otc_avg, otc_min = quote["avg"], quote["min"]
 
-    metrics = evaluator.build_metrics(merged, otc_price, skip_otc=is_spac_reit)
+    metrics = evaluator.build_metrics(merged, otc_avg, skip_otc=is_spac_reit)
+    # 장외 최소호가 기준 괴리율(분석가 방식)도 함께 — 평균/최소 둘 다 표시·채점
+    otc_min_premium = (None if (is_spac_reit or otc_min is None)
+                       else evaluator.otc_premium(otc_min, cp))
+    metrics["otc_min_premium"] = otc_min_premium
+    metrics["otc_min_price"] = otc_min
+    metrics["otc_avg_price"] = otc_avg
+
     result = evaluator.evaluate_ipo_score(metrics, is_simultaneous=is_simultaneous,
                                           is_spac_reit=is_spac_reit)
+    # 최소호가 기준 총점(자동알림·표시용) — 장외 칸만 최소 괴리율로 교체해 재채점
+    min_metrics = {**metrics, "otc_premium": otc_min_premium}
+    result_min = evaluator.evaluate_ipo_score(min_metrics, is_simultaneous=is_simultaneous,
+                                              is_spac_reit=is_spac_reit)
     # 스팩은 경쟁률·확약만으로 별도 판정(리츠는 분석 제외 — spac_result=None)
     spac_result = evaluator.evaluate_spac(metrics) if is_spac else None
 
-    return {"merged": merged, "metrics": metrics, "result": result,
+    return {"merged": merged, "metrics": metrics, "result": result, "result_min": result_min,
             "is_spac_reit": is_spac_reit, "is_spac": is_spac, "is_reit": is_reit,
             "spac_result": spac_result, "name": name, "no": no}
 

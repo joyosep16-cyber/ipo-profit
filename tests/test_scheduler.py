@@ -101,31 +101,35 @@ def test_analysis_alert_routes_spac_and_normal(monkeypatch):
     monkeypatch.setattr(database, "log_notification", lambda t, k=None: logged.append((t, k)))
     monkeypatch.setattr(scraper, "fetch_schedule", lambda **kw: [
         {"name": "한국스팩16호", "no": "1"},   # 스팩 적극관심 → 발송
-        {"name": "좋은공모주", "no": "2"},      # 일반 20점 → 발송
-        {"name": "약한공모주", "no": "3"},      # 일반 12점 → 미발송
+        {"name": "좋은공모주", "no": "2"},      # 일반 최소총점 18 → 발송
+        {"name": "약한공모주", "no": "3"},      # 일반 최소총점 12 → 미발송
         {"name": "무관심스팩", "no": "4"},      # 스팩 신중 → 미발송
+        {"name": "평균만높은", "no": "5"},      # 평균 18 but 최소 15 → 미발송(최소 기준)
     ])
     bundles = {
         "1": {"is_spac": True, "is_reit": False, "spac_result": {"verdict": "적극 관심"},
-              "merged": {}, "metrics": {}, "result": {}},
+              "merged": {}, "metrics": {}, "result": {}, "result_min": {}},
         "2": {"is_spac": False, "is_reit": False, "spac_result": None,
-              "merged": {}, "metrics": {}, "result": {"total": 20}},
+              "merged": {}, "metrics": {}, "result": {"total": 21}, "result_min": {"total": 18}},
         "3": {"is_spac": False, "is_reit": False, "spac_result": None,
-              "merged": {}, "metrics": {}, "result": {"total": 12}},
+              "merged": {}, "metrics": {}, "result": {"total": 15}, "result_min": {"total": 12}},
         "4": {"is_spac": True, "is_reit": False, "spac_result": {"verdict": "신중"},
-              "merged": {}, "metrics": {}, "result": {}},
+              "merged": {}, "metrics": {}, "result": {}, "result_min": {}},
+        "5": {"is_spac": False, "is_reit": False, "spac_result": None,
+              "merged": {}, "metrics": {}, "result": {"total": 18}, "result_min": {"total": 15}},
     }
     monkeypatch.setattr(service, "analyze_by_no", lambda no, is_simultaneous=False: bundles[no])
     monkeypatch.setattr(discord_notifier, "send_analysis_score",
-                        lambda d, r, m: sent.append(("normal", r["total"])))
+                        lambda d, r, m, rmin=None: sent.append(("normal", rmin["total"])))
     monkeypatch.setattr(discord_notifier, "send_spac_analysis",
                         lambda d, s, m: sent.append(("spac", s["verdict"])))
 
     scheduler._analysis_alert_job()
 
     assert ("spac", "적극 관심") in sent
-    assert ("normal", 20) in sent
+    assert ("normal", 18) in sent            # 최소 총점 18 ≥16 → 발송
     assert ("normal", 12) not in sent
+    assert ("normal", 15) not in sent        # 평균 18이어도 최소 15 → 미발송
     assert ("spac", "신중") not in sent
     assert len(sent) == 2 and len(logged) == 2
 
