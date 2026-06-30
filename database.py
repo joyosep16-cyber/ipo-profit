@@ -1,5 +1,4 @@
 import os
-from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import (
@@ -7,6 +6,9 @@ from sqlalchemy import (
     create_engine, extract, func, select, text
 )
 from sqlalchemy.orm import DeclarativeBase, Session
+
+# 저장 타임스탬프도 KST 기준(서버 OS 타임존 무관). timeutil 은 stdlib 만 의존.
+from utils.timeutil import now_kst_naive
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -49,8 +51,8 @@ class IPORecord(Base):
     sell_price = Column(Integer, default=0)
     return_rate = Column(Float, nullable=True)
     memo = Column(Text, default="")
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now)
+    created_at = Column(DateTime, default=now_kst_naive)
+    updated_at = Column(DateTime, default=now_kst_naive)
 
 
 class AppSetting(Base):
@@ -73,7 +75,7 @@ class NotificationLog(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     type = Column(String(50), nullable=False)
     ref_key = Column(String(50), nullable=True)
-    sent_at = Column(DateTime, default=datetime.now)
+    sent_at = Column(DateTime, default=now_kst_naive)
 
 
 class WatchlistItem(Base):
@@ -88,7 +90,7 @@ class WatchlistItem(Base):
     ipo_price    = Column(Integer, nullable=True)
     memo         = Column(Text, default="")
     status       = Column(String(20), default="관심")
-    created_at   = Column(DateTime, default=datetime.now)
+    created_at   = Column(DateTime, default=now_kst_naive)
     # 공모주 분석 점수 연동 (analyzer 엔진 결과)
     analysis_score = Column(Integer, nullable=True)    # 총점 (스팩/리츠는 NULL)
     analysis_grade = Column(String(20), nullable=True) # 추천 등급
@@ -200,7 +202,7 @@ def update_record(record_id: int, data: dict) -> Optional[dict]:
             return None
         for key, value in data.items():
             setattr(record, key, value)
-        record.updated_at = datetime.now()
+        record.updated_at = now_kst_naive()
         session.commit()
         session.refresh(record)
         return _to_dict(record)
