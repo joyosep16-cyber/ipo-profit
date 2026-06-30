@@ -160,16 +160,18 @@ def _pending_summary_job() -> None:
 
 
 def _analysis_alert_job() -> None:
-    """매일 14·15·16·17시 — 청약일정 종목 수요예측 분석 후 16점+ Discord 자동 알림.
+    """매일 14·15·16·17시 — 청약일정 종목 분석 후 Discord 자동 알림.
 
-    스팩/리츠 제외, 중복 발송 방지(NotificationLog), 종목 간 예외 격리.
-    설정에서 자동알림 OFF면 즉시 종료.
+    - 일반 공모주: 가이드 총점 ≥ 임계점(기본 16) 이면 발송.
+    - 스팩(SPAC): 전용 판정 verdict 가 '관심'/'적극 관심' 이면 발송.
+    - 리츠(REIT): 제외.
+    중복 발송 방지(NotificationLog), 종목 간 예외 격리. 자동알림 OFF면 즉시 종료.
     """
     try:
         import os
         from database import get_setting, is_analysis_alerted, log_notification
-        from utils.discord_notifier import send_analysis_score
-        from analyzer import scraper, evaluator, service, config
+        from utils.discord_notifier import send_analysis_score, send_spac_analysis
+        from analyzer import scraper, service, config
 
         # 자동알림 on/off
         if get_setting("ANALYSIS_AUTO_ALERT", "1") != "1":
@@ -186,17 +188,26 @@ def _analysis_alert_job() -> None:
         except ValueError:
             threshold = config.SCORE_THRESHOLD
 
-        for c in scraper.fetch_schedule():
+        _SPAC_ALERT_VERDICTS = ("관심", "적극 관심")
+
+        # 스팩 포함(리츠는 fetch 에서 제외)
+        for c in scraper.fetch_schedule(exclude_spac=False):
             name = c.get("name", "")
             no = c.get("no", "")
-            if evaluator.is_spac_or_reit(name):
-                continue
             if is_analysis_alerted(no):
                 continue
             try:
                 bundle = service.analyze_by_no(no)
-                if not bundle or bundle["is_spac_reit"]:
+                if not bundle or bundle.get("is_reit"):
                     continue
+                if bundle["is_spac"]:
+                    # 스팩: 관심/적극 관심이면 전용 카드 발송
+                    spac = bundle.get("spac_result")
+                    if spac and spac["verdict"] in _SPAC_ALERT_VERDICTS:
+                        send_spac_analysis(bundle["merged"], spac, bundle["metrics"])
+                        log_notification("analysis_alert", no)
+                    continue
+                # 일반 공모주: 임계점 이상이면 발송
                 total = bundle["result"].get("total")
                 if total is not None and total >= threshold:
                     send_analysis_score(bundle["merged"], bundle["result"], bundle["metrics"])
