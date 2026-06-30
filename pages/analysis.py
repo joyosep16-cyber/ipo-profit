@@ -91,7 +91,7 @@ def _render_score_card(bundle: dict) -> None:
         if metrics.get("circulating_missing") and not metrics.get("circulating_eok"):
             m3.metric("유통가능규모", "N/A", help="38에 유통가능물량 표가 없는 종목. 아래에서 수동 입력하세요.")
         else:
-            m3.metric("유통가능규모", f"{metrics['circulating_eok']:,.0f}억원")
+            m3.metric("유통가능규모", f"{metrics['circulating_eok']:,.1f}억원")
         prem = metrics["otc_premium"]
         if metrics.get("otc_missing"):
             m4.metric("장외 괴리율", "없음", help="매도호가·매수호가가 모두 있어야 시세로 인정 (없으면 -2점)")
@@ -139,7 +139,7 @@ def _render_score_card(bundle: dict) -> None:
                          "확정공모가를 곱해 금액(억원)을 계산합니다.")
                 if manual_shares > 0:
                     manual_eok = evaluator.circulating_eok_from_shares(manual_shares, cprice)
-                    st.caption(f"{manual_shares:,}주 × {int(cprice):,}원 = 약 **{manual_eok:,.0f}억원**")
+                    st.caption(f"{manual_shares:,}주 × {int(cprice):,}원 = 약 **{manual_eok:,.1f}억원**")
                     score_metrics = {**metrics, "circulating_eok": manual_eok,
                                      "circulating_missing": False}
             else:
