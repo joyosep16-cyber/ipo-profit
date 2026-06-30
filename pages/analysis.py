@@ -127,15 +127,30 @@ def _render_score_card(bundle: dict) -> None:
         # 유통가능물량 데이터가 38에 없는 종목은 수동 입력으로 보정 (분석가/DART 값)
         score_metrics = metrics
         if metrics.get("circulating_missing") and not metrics.get("circulating_eok"):
+            cprice = merged.get("confirmed_price") or 0
             st.warning("⚠️ 38에 유통가능물량 표가 없어 자동 산출이 안 됩니다. "
                        "아래에 값을 입력하면 점수에 반영됩니다. (미입력 시 유통 0점)")
-            manual_eok = st.number_input(
-                "유통가능규모 수동 입력 (억원)", min_value=0.0, value=0.0, step=10.0,
-                key=f"circ_{bundle['no']}",
-                help="분석가 자료나 DART 증권신고서의 '공모 후 유통가능물량' 금액(억원)을 입력")
-            if manual_eok > 0:
-                score_metrics = {**metrics, "circulating_eok": manual_eok,
-                                 "circulating_missing": False}
+            if cprice > 0:
+                # 주식수 입력 → 확정공모가를 곱해 금액(억원) 자동 산출
+                manual_shares = st.number_input(
+                    "유통가능 주식수 입력 (주)", min_value=0, value=0, step=1000,
+                    key=f"circ_sh_{bundle['no']}",
+                    help="DART 증권신고서/분석가 자료의 '공모 후 유통가능물량' 주식수를 입력하면 "
+                         "확정공모가를 곱해 금액(억원)을 계산합니다.")
+                if manual_shares > 0:
+                    manual_eok = evaluator.circulating_eok_from_shares(manual_shares, cprice)
+                    st.caption(f"{manual_shares:,}주 × {int(cprice):,}원 = 약 **{manual_eok:,.0f}억원**")
+                    score_metrics = {**metrics, "circulating_eok": manual_eok,
+                                     "circulating_missing": False}
+            else:
+                # 확정공모가가 없어 곱셈 불가 → 억원 직접 입력 폴백
+                manual_eok = st.number_input(
+                    "유통가능규모 직접 입력 (억원)", min_value=0.0, value=0.0, step=10.0,
+                    key=f"circ_{bundle['no']}",
+                    help="확정공모가가 없어 자동 계산이 불가합니다. 금액(억원)을 직접 입력하세요.")
+                if manual_eok > 0:
+                    score_metrics = {**metrics, "circulating_eok": manual_eok,
+                                     "circulating_missing": False}
 
         # 캐시된 bundle 을 변형하지 않도록 지역 변수에만 재계산 결과 보관
         result = evaluator.evaluate_ipo_score(
@@ -162,7 +177,8 @@ def _render_score_card(bundle: dict) -> None:
             if not (os.getenv("DISCORD_WEBHOOK_URL") or get_setting("DISCORD_WEBHOOK_URL")):
                 st.error("Discord 웹훅이 설정되지 않았습니다. 설정 페이지에서 등록하세요.")
             else:
-                discord_notifier.send_analysis_score(merged, result, metrics)
+                # score_metrics: 수동 보정(유통가능규모)이 반영된 지표 — 화면 점수와 일치시킴
+                discord_notifier.send_analysis_score(merged, result, score_metrics)
                 st.success("Discord로 발송했습니다.")
     with b2:
         if st.button("⭐ 관심목록에 추가", key=f"wl_{bundle['no']}", use_container_width=True):

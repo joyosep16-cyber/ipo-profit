@@ -39,6 +39,27 @@ def test_otc_premium():
     assert evaluator.otc_premium(None, 50_000) == 0.0  # 장외 없음 → 0%
 
 
+def test_circulating_eok_from_shares():
+    # 유통가능금액(억) = 주식수 × 확정공모가 / 1억
+    assert evaluator.circulating_eok_from_shares(1_000_000, 30_000) == 300.0
+    assert evaluator.circulating_eok_from_shares(None, 30_000) == 0.0      # 주식수 없음
+    assert evaluator.circulating_eok_from_shares(1_000_000, None) == 0.0   # 공모가 없음
+
+
+def test_circulating_missing_rescored_by_shares():
+    # 유통 데이터 없는 종목(0점)을 주식수×공모가로 보정하면 정상 채점된다.
+    metrics = {
+        "inst_competition": 550.0, "lockup_ratio": 35.0, "circulating_eok": 0.0,
+        "circulating_missing": True, "otc_premium": 200.0, "raw_verified": True,
+    }
+    assert evaluator.evaluate_ipo_score(metrics)["scores"]["circulating"] == 0
+    eok = evaluator.circulating_eok_from_shares(1_000_000, 30_000)   # 300억
+    assert eok == 300.0
+    m2 = {**metrics, "circulating_eok": eok, "circulating_missing": False}
+    # 300억 → SCORE_CIRCULATING_EOK 에서 <=500 구간 = 6점
+    assert evaluator.evaluate_ipo_score(m2)["scores"]["circulating"] == 6
+
+
 # ---------------------------------------------------------------------------
 # 항목별 점수 경계값
 # ---------------------------------------------------------------------------

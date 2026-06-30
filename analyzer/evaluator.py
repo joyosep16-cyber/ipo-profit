@@ -31,6 +31,15 @@ def circulating_value(circulating_shares: float, confirmed_price: float) -> floa
     return (circulating_shares or 0) * (confirmed_price or 0)
 
 
+def circulating_eok_from_shares(circulating_shares: float, confirmed_price: float) -> float:
+    """[유통가능금액(억원)] = 유통가능주식수 * 확정공모가 / 1억.
+
+    유통가능금액(억원)이 직접 안 나오는 종목을, 주식수와 확정공모가로 산출할 때 사용.
+    둘 중 하나라도 없으면 0.0.
+    """
+    return circulating_value(circulating_shares, confirmed_price) / config.EOK
+
+
 def otc_premium(otc_price: Optional[float], confirmed_price: float) -> float:
     """[장외 괴리율(%)] = (장외유추가격 - 확정공모가) / 확정공모가 * 100
     장외가가 없으면(None) 괴리율 0%로 처리."""
