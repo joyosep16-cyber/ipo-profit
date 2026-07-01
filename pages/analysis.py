@@ -32,6 +32,18 @@ def _cached_schedule() -> list[dict]:
     return scraper.fetch_schedule(exclude_spac=False, drop_listed=True)
 
 
+def _fmt_candidate(c: dict) -> str:
+    """드롭다운 표시: '종목명 · 청약 YYYY/MM/DD~YYYY/MM/DD (no=XXXX)'."""
+    ss, se = c.get("sub_start"), c.get("sub_end")
+    if ss and se:
+        sched = f"청약 {ss:%Y/%m/%d}~{se:%Y/%m/%d}"
+    elif ss:
+        sched = f"청약 {ss:%Y/%m/%d}~"
+    else:
+        sched = "청약일 미정"
+    return f"{c['name']}  ·  {sched}  (no={c['no']})"
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def _cached_analyze(no: str) -> dict | None:
     return service.analyze_by_no(no)
@@ -280,7 +292,11 @@ with tab_list:
     if not candidates:
         st.warning("청약일정을 불러오지 못했습니다. (네트워크 또는 사이트 상태 확인)")
     else:
-        names = [f"{c['name']}  (no={c['no']})" for c in candidates]
+        # 청약 시작일 빠른 순 정렬(미상은 뒤로) + 드롭다운에 청약일정 함께 표시
+        candidates = sorted(
+            candidates,
+            key=lambda c: (c.get("sub_start") is None, str(c.get("sub_start") or "")))
+        names = [_fmt_candidate(c) for c in candidates]
         idx = st.selectbox("분석할 종목 선택", range(len(candidates)),
                            format_func=lambda i: names[i])
         if st.button("📊 분석 실행", type="primary"):
