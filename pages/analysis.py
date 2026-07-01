@@ -33,12 +33,12 @@ def _cached_schedule() -> list[dict]:
 
 
 def _fmt_candidate(c: dict) -> str:
-    """드롭다운 표시: '종목명 · 청약 YYYY/MM/DD~YYYY/MM/DD (no=XXXX)'."""
+    """드롭다운 표시: '종목명 · 청약 YYYY-MM-DD~YYYY-MM-DD (no=XXXX)'."""
     ss, se = c.get("sub_start"), c.get("sub_end")
     if ss and se:
-        sched = f"청약 {ss:%Y/%m/%d}~{se:%Y/%m/%d}"
+        sched = f"청약 {ss:%Y-%m-%d}~{se:%Y-%m-%d}"
     elif ss:
-        sched = f"청약 {ss:%Y/%m/%d}~"
+        sched = f"청약 {ss:%Y-%m-%d}~"
     else:
         sched = "청약일 미정"
     return f"{c['name']}  ·  {sched}  (no={c['no']})"
