@@ -72,9 +72,6 @@ _FUND_HREF_RE = re.compile(r"/html/fund/.*?[?&]o=v.*?[?&]no=\d+")
 # 청약일 범위: '2026.07.01~07.02' (시작 YYYY.MM.DD ~ 종료 MM.DD)
 _SUB_DATE_RE = re.compile(r"(\d{4})\.(\d{1,2})\.(\d{1,2})\s*~\s*(\d{1,2})\.(\d{1,2})")
 
-# 청약 종료 후 이 일수가 지나면 '이미 상장됨'으로 간주하여 목록에서 제외.
-# (대부분의 신규상장은 청약 종료 후 2주 이내에 이뤄짐)
-LISTING_GRACE_DAYS = 14
 
 
 def _clean_schedule_name(text: str) -> str:
@@ -162,9 +159,8 @@ def fetch_schedule(only_upcoming: bool = True, exclude_spac: bool = True,
     공모분석 상세 링크(/html/fund/?o=v&no=...)만 종목으로 취급한다.
     뉴스 링크(/html/news/)와 부가 설명 텍스트는 제외/정리한다.
 
-    only_upcoming=True (기본): 이미 상장된 종목을 제외하고
-      '청약 예정 + 상장 대기' 종목만 반환한다.
-      판정: 청약 종료일 >= 오늘 - LISTING_GRACE_DAYS (청약일 미상이면 안전하게 포함).
+    only_upcoming=True (기본): 청약이 끝난 종목(청약 종료일 < 오늘)을 제외하고
+      '청약 진행/예정' 종목만 반환한다. (청약일 미상이면 안전하게 포함)
     exclude_spac/exclude_reit=True (기본): 각각 스팩·리츠를 목록에서 제외한다.
       스팩 전용 분석을 위해 목록에 스팩을 노출하려면 exclude_spac=False 로 호출.
     drop_listed=True: 청약이 끝난 후보의 상세를 조회해 '상장일이 지난'(이미 상장)
@@ -177,7 +173,6 @@ def fetch_schedule(only_upcoming: bool = True, exclude_spac: bool = True,
         return []
 
     today = _today_kst()
-    cutoff = today - timedelta(days=LISTING_GRACE_DAYS)
 
     candidates: dict[str, dict] = {}  # no -> record (중복 제거)
     dropped_excluded = 0
@@ -227,12 +222,13 @@ def fetch_schedule(only_upcoming: bool = True, exclude_spac: bool = True,
         dropped = 0
         for c in result:
             se = c.get("sub_end")
-            # 청약일 미상 → 안전하게 포함 / 청약 종료일이 cutoff 이후면 미상장으로 간주
-            if se is None or se >= cutoff:
+            # 청약 종료일이 지나지 않은(오늘 이상) 종목만 — 청약 끝난 종목 제외
+            # (청약일 미상은 안전하게 포함)
+            if se is None or se >= today:
                 kept.append(c)
             else:
                 dropped += 1
-        logger.info("청약일정 후보 %d종목 (미상장 %d, 이미 상장 추정 %d 제외%s)",
+        logger.info("청약일정 후보 %d종목 (청약 진행/예정 %d, 청약 종료 %d 제외%s)",
                     total, len(kept), dropped, spac_note)
         result = kept
     else:
