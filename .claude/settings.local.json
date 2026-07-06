@@ -8,7 +8,24 @@
       "Bash(Sort-Object FullName)",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "PowerShell(Head -20)",
+      "PowerShell(\\(Get-ChildItem \"C:\\\\Users\\\\ADMIN\\\\OneDrive\\\\바탕 화면\\\\IPO Subscription\" -Recurse -ErrorAction SilentlyContinue | Measure-Object\\).Count)",
+      "Bash(python -m py_compile app.py pages/*.py utils/*.py database.py)",
+      "Bash(dir /B *.txt *.md)",
+      "PowerShell(gh --version 2>&1)",
+      "PowerShell(winget install --id GitHub.cli -e)",
+      "Bash(gh --version)",
+      "PowerShell(gh --version)",
+      "Bash(python -c ' *)",
+      "Bash(python -m pytest tests/ -q)",
+      "PowerShell(python -c \"import ast; ast.parse\\(open\\('pages/analysis.py',encoding='utf-8'\\).read\\(\\)\\); print\\('analysis.py syntax OK'\\)\")",
+      "PowerShell(python -c \"from analyzer import evaluator; print\\('300��:', evaluator.circulating_eok_from_shares\\(1_000_000, 30_000\\)\\)\")",
+      "PowerShell(python -m pytest -q 2>&1)",
+      "PowerShell(python -c \"from analyzer import evaluator, service, scraper; from utils import discord_notifier; print\\('imports OK'\\); print\\('spac:', evaluator.is_spac\\('��������'\\), evaluator.is_reit\\('��������'\\)\\); print\\('verdict:', evaluator.evaluate_spac\\({'inst_competition':1200,'lockup_ratio':4}\\)['verdict']\\)\")",
+      "PowerShell(python -c \"from analyzer import scraper; base=[c['name'] for c in scraper.fetch_schedule\\(\\)]; withspac=[c['name'] for c in scraper.fetch_schedule\\(exclude_spac=False\\)]; sp=[n for n in withspac if scraper._is_spac\\(n\\)]; print\\('�⺻ ��� ��:', len\\(base\\), '| ���� ���� ��� ��:', len\\(withspac\\)\\); print\\('����� ����:', sp[:10] if sp else '\\(���� û�������� ���� ����\\)'\\)\" 2>&1)",
+      "PowerShell(git add analyzer/config.py analyzer/evaluator.py analyzer/scraper.py analyzer/service.py utils/scheduler.py utils/discord_notifier.py pages/analysis.py tests/test_spac.py)",
+      "PowerShell(git commit -F C:\\\\Temp\\\\_commitmsg.txt)"
     ]
   }
 }
