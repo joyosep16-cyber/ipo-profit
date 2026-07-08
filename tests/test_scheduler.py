@@ -45,46 +45,60 @@ def _setup(monkeypatch, wl, recs):
     return sent, logged
 
 
-def test_listing_alerts_merge_dedup_and_filter(monkeypatch):
+def test_listing_alerts_gated_by_record(monkeypatch):
+    # 보유 판정은 IPORecord(당첨·매도가 미입력) 기준. 관심목록은 상장일 보완용.
     today = scheduler._today_kst()
     tomorrow = today + timedelta(days=1)
     wl = [
-        {"id": 1, "stock_name": "워치오늘", "broker": "키움", "listing_date": today,
+        # 관심목록에만 있고 기록 없음 → 대기 아님(미당첨/삭제된 유령 항목 방지 = 레메디 케이스)
+        {"id": 1, "stock_name": "워치만있음", "broker": "키움", "listing_date": today,
          "ipo_price": 30000, "analysis_score": 25, "analysis_grade": "최우선"},
-        {"id": 9, "stock_name": "공통종목", "broker": "NH", "listing_date": tomorrow,
+        # 상장일 보완용(기록에 sell_date 없을 때)
+        {"id": 9, "stock_name": "보완필요", "broker": "NH", "listing_date": tomorrow,
          "ipo_price": 10000, "analysis_score": 18, "analysis_grade": "청약"},
     ]
     recs = [
-        {"stock_name": "레코드내일", "broker": "삼성", "sub_result": "당첨",
-         "sell_price": 0, "sell_date": tomorrow, "ipo_price": 20000},
+        {"stock_name": "당첨오늘", "broker": "삼성", "sub_result": "당첨",
+         "sell_price": 0, "sell_date": today, "ipo_price": 20000},          # DAY
+        {"stock_name": "당첨내일", "broker": "삼성", "sub_result": "당첨",
+         "sell_price": 0, "sell_date": tomorrow, "ipo_price": 20000},        # D-1
         {"stock_name": "이미매도", "broker": "KB", "sub_result": "당첨",
-         "sell_price": 55000, "sell_date": today, "ipo_price": 20000},
+         "sell_price": 55000, "sell_date": today, "ipo_price": 20000},       # 제외(매도)
         {"stock_name": "미당첨종목", "broker": "KB", "sub_result": "미당첨",
-         "sell_price": 0, "sell_date": today, "ipo_price": 20000},
-        {"stock_name": "상장일없음", "broker": "KB", "sub_result": "당첨",
-         "sell_price": 0, "sell_date": None, "ipo_price": 20000},
-        {"stock_name": "공통종목", "broker": "NH", "sub_result": "당첨",
-         "sell_price": 0, "sell_date": tomorrow, "ipo_price": 10000},
+         "sell_price": 0, "sell_date": today, "ipo_price": 20000},           # 제외(미당첨)
+        {"stock_name": "보완필요", "broker": "NH", "sub_result": "당첨",
+         "sell_price": 0, "sell_date": None, "ipo_price": 10000},            # sell_date 없음→관심목록 보완(D-1)
     ]
     sent, logged = _setup(monkeypatch, wl, recs)
 
     scheduler._listing_dday_job()
     scheduler._listing_day_job()
 
-    assert ("DAY", "워치오늘") in sent
-    assert ("D-1", "레코드내일") in sent
-    assert ("D-1", "공통종목") in sent
-    assert sum(1 for x in sent if x[1] == "공통종목") == 1   # 두 소스 중복 → 1회
+    assert ("DAY", "당첨오늘") in sent
+    assert ("D-1", "당첨내일") in sent
+    assert ("D-1", "보완필요") in sent          # 기록 있음 + 관심목록 상장일 보완
     names = {x[1] for x in sent}
-    assert {"이미매도", "미당첨종목", "상장일없음"}.isdisjoint(names)
+    # 워치만있음(기록 없음)·이미매도·미당첨종목 → 알림 없음
+    assert {"워치만있음", "이미매도", "미당첨종목"}.isdisjoint(names)
     assert len(sent) == 3
+
+
+def test_pending_excludes_deleted_record_watchlist_ghost(monkeypatch):
+    # 레메디 케이스: 관심목록 '청약완료'는 남아있지만 수익기록 삭제됨 → 대기 목록에서 제외
+    today = scheduler._today_kst()
+    wl = [{"id": 1, "stock_name": "레메디", "broker": "KB",
+           "listing_date": today + timedelta(days=4), "ipo_price": 20700,
+           "analysis_score": 18, "analysis_grade": "강력 청약"}]
+    monkeypatch.setattr(database, "get_watchlist", lambda status=None: wl)
+    monkeypatch.setattr(database, "get_records", lambda year=None: [])   # 기록 삭제됨
+    assert scheduler._pending_listing_candidates() == []
 
 
 def test_listing_alert_no_duplicate_on_rerun(monkeypatch):
     today = scheduler._today_kst()
-    wl = [{"id": 1, "stock_name": "오늘상장", "broker": "키움", "listing_date": today,
-           "ipo_price": 30000, "analysis_score": None, "analysis_grade": None}]
-    sent, logged = _setup(monkeypatch, wl, [])
+    recs = [{"stock_name": "오늘상장", "broker": "키움", "sub_result": "당첨",
+             "sell_price": 0, "sell_date": today, "ipo_price": 30000}]
+    sent, logged = _setup(monkeypatch, [], recs)
     scheduler._listing_day_job()
     scheduler._listing_day_job()   # 재실행 → NotificationLog 로 중복 차단
     assert sent == [("DAY", "오늘상장")]
@@ -136,18 +150,19 @@ def test_analysis_alert_routes_spac_and_normal(monkeypatch):
 
 def test_pending_summary_future_only_sorted(monkeypatch):
     today = scheduler._today_kst()
-    wl = [
-        {"id": 1, "stock_name": "대기A", "broker": "키움", "listing_date": today + timedelta(days=2),
-         "ipo_price": 30000, "analysis_score": 25, "analysis_grade": "최우선"},
-        {"id": 2, "stock_name": "오늘상장", "broker": "NH", "listing_date": today,
-         "ipo_price": 10000, "analysis_score": 18, "analysis_grade": "청약"},
-        {"id": 3, "stock_name": "과거상장", "broker": "KB", "listing_date": today - timedelta(days=3),
-         "ipo_price": 10000, "analysis_score": None, "analysis_grade": None},
+    # 보유 판정은 당첨 기록 기준. 상장일은 기록 sell_date.
+    recs = [
+        {"stock_name": "대기A", "broker": "키움", "sub_result": "당첨", "sell_price": 0,
+         "sell_date": today + timedelta(days=2), "ipo_price": 30000},
+        {"stock_name": "오늘상장", "broker": "NH", "sub_result": "당첨", "sell_price": 0,
+         "sell_date": today, "ipo_price": 10000},
+        {"stock_name": "과거상장", "broker": "KB", "sub_result": "당첨", "sell_price": 0,
+         "sell_date": today - timedelta(days=3), "ipo_price": 10000},
     ]
     batches = []
     notified = set()
-    monkeypatch.setattr(database, "get_watchlist", lambda status=None: wl)
-    monkeypatch.setattr(database, "get_records", lambda year=None: [])
+    monkeypatch.setattr(database, "get_watchlist", lambda status=None: [])
+    monkeypatch.setattr(database, "get_records", lambda year=None: recs)
     monkeypatch.setattr(database, "is_notified", lambda t, k: k in notified)
     monkeypatch.setattr(database, "log_notification", lambda t, k=None: notified.add(k))
     monkeypatch.setattr(discord_notifier, "send_pending_holdings_summary",

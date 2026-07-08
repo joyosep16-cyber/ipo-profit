@@ -58,37 +58,37 @@ def _watchlist_reminder_job() -> None:
 
 
 def _pending_listing_candidates() -> list:
-    """청약 신청했으나 아직 상장(매도) 전인 종목 후보 — 상장일 보유 건만.
+    """청약 당첨 후 아직 상장(매도) 전인 '보유' 종목 후보.
 
-    두 소스를 (종목명, 상장일) 기준으로 중복 제거해 합친다:
-      (1) 관심목록 '청약완료' (listing_date 보유) — 분석점수까지 포함
-      (2) IPORecord 당첨 & 매도가 미입력(sell_price 0/None) & 상장일(sell_date) 보유
-          → "청약 신청 후 아직 매도가를 안 적은" 보유 종목 (사용자 제안 기준)
-    같은 종목이 양쪽에 있으면 (1)을 우선(분석점수 보존)."""
+    보유 판정 기준은 **IPORecord(당첨 & 매도가 미입력)** 하나다.
+      - 미당첨이거나 수익기록을 삭제하면 → 대기 목록에서 자동 제외.
+      - 매도가를 입력하면(매도 완료) → 제외.
+    관심목록('청약완료')은 **상장일·분석점수 보완용**으로만 사용한다. (관심목록 항목만으로는
+    포함하지 않음 — 미당첨/삭제된 종목의 유령 항목이 대기로 남는 것을 방지)
+    상장일은 기록의 sell_date 우선, 없으면 관심목록 listing_date 로 보완."""
     from database import get_watchlist, get_records
 
-    by_key: dict = {}
+    wl: dict = {}   # 종목명 -> 관심목록 항목(상장일·분석점수 보완)
     for w in get_watchlist(status=WATCHLIST_STATUS_SUBSCRIBED):
-        ld = w.get("listing_date")
-        if not ld:
-            continue
-        by_key.setdefault((w["stock_name"], ld), {
-            "stock_name": w["stock_name"], "broker": w.get("broker"),
-            "listing_date": ld, "ipo_price": w.get("ipo_price"),
-            "analysis_score": w.get("analysis_score"), "analysis_grade": w.get("analysis_grade"),
-        })
+        wl.setdefault(w["stock_name"], w)
+
+    by_key: dict = {}
     for r in get_records():
         if r.get("sub_result") == "미당첨":   # 미당첨은 보유 물량 없음
             continue
-        if r.get("sell_price"):               # 매도가 입력됨 → 이미 매도/상장 지남
+        if r.get("sell_price"):               # 매도가 입력됨 → 이미 매도
             continue
-        ld = r.get("sell_date")               # input 페이지 '🏛️ 상장일' = sell_date
+        w = wl.get(r["stock_name"], {})
+        ld = r.get("sell_date") or w.get("listing_date")   # 상장일: 기록 우선, 없으면 관심목록 보완
         if not ld:
             continue
         by_key.setdefault((r["stock_name"], ld), {
-            "stock_name": r["stock_name"], "broker": r.get("broker"),
-            "listing_date": ld, "ipo_price": r.get("ipo_price"),
-            "analysis_score": None, "analysis_grade": None,
+            "stock_name": r["stock_name"],
+            "broker": r.get("broker") or w.get("broker"),
+            "listing_date": ld,
+            "ipo_price": r.get("ipo_price"),
+            "analysis_score": w.get("analysis_score"),
+            "analysis_grade": w.get("analysis_grade"),
         })
     return list(by_key.values())
 
